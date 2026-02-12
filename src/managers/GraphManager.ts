@@ -27,27 +27,77 @@ export interface GraphStats {
 export class GraphManager {
   /**
    * Build a graph from contents and links
-   * @param state - The application state
-   * @param areaId - Optional area ID to filter by
    */
   static buildGraph(state: AppState, areaId?: string): GraphData {
-    // Get all contents (both open and closed)
     const contents = GraphManager.getContents(state, areaId);
     const contentIds = new Set(contents.map((c) => c.id));
-
-    // Create nodes from contents
-    const nodes = NodeFactory.createNodes(contents);
-
-    // Get links between contents
     const relevantLinks = state.links.filter(
       (link) =>
         contentIds.has(link.fromContentId) && contentIds.has(link.toContentId),
     );
-
-    // Create edges from links
+    const nodes = NodeFactory.createNodes(contents, undefined, relevantLinks);
     const edges = EdgeFactory.createEdges(relevantLinks);
+    return { nodes, edges };
+  }
+
+  /**
+   * Build a graph showing areas as nodes.
+   * Edges connect areas that have at least one link between their contents.
+   */
+  static buildAreaGraph(state: AppState): GraphData {
+    const areas = state.areas;
+    const contentCounts = new Map<string, number>();
+    for (const a of areas) {
+      const count = state.contents.filter((c) => c.areaId === a.id).length;
+      contentCounts.set(a.id, count);
+    }
+    const nodes = NodeFactory.createAreaNodes(areas, contentCounts);
+
+    // Build inter-area edges: if any content in area A links to any content in area B
+    const contentToArea = new Map<string, string>();
+    for (const c of state.contents) {
+      contentToArea.set(c.id, c.areaId);
+    }
+
+    const edgeSet = new Set<string>();
+    const edges: CytoscapeEdge[] = [];
+    for (const link of state.links) {
+      const areaA = contentToArea.get(link.fromContentId);
+      const areaB = contentToArea.get(link.toContentId);
+      if (!areaA || !areaB || areaA === areaB) continue;
+      const key = [areaA, areaB].sort().join('-');
+      if (edgeSet.has(key)) continue;
+      edgeSet.add(key);
+      edges.push({
+        data: {
+          id: `area-edge:${key}`,
+          source: `area:${areaA}`,
+          target: `area:${areaB}`,
+          linkId: `area-edge:${key}`,
+          linkType: LinkType.MANUAL,
+        },
+      });
+    }
 
     return { nodes, edges };
+  }
+
+  /**
+   * Update area node position in state
+   */
+  static updateAreaNodePosition(
+    state: AppState,
+    areaId: string,
+    x: number,
+    y: number,
+  ): AppState {
+    const areaIndex = state.areas.findIndex((a) => a.id === areaId);
+    if (areaIndex === -1) return state;
+    const area = state.areas[areaIndex];
+    const updated = { ...area, nodePosition: { x, y }, updatedAt: Date.now() };
+    const newAreas = [...state.areas];
+    newAreas[areaIndex] = updated;
+    return { ...state, areas: newAreas };
   }
 
   /**
@@ -87,7 +137,12 @@ export class GraphManager {
     areaId: string,
   ): CytoscapeNode[] {
     const contents = GraphManager.getContents(state, areaId);
-    return NodeFactory.createNodes(contents);
+    const contentIds = new Set(contents.map((c) => c.id));
+    const relevantLinks = state.links.filter(
+      (link) =>
+        contentIds.has(link.fromContentId) && contentIds.has(link.toContentId),
+    );
+    return NodeFactory.createNodes(contents, undefined, relevantLinks);
   }
 
   /**

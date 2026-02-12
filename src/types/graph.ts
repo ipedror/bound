@@ -36,8 +36,13 @@ export interface CytoscapeNodeData {
   readonly areaId: string;
   readonly label: string;
   readonly emoji?: string;
+  readonly emojiImage?: string;
   readonly title: string;
   readonly color?: string;
+  /** 'area' for area-level nodes, 'content' for normal content nodes, 'frame' for frames */
+  readonly nodeType?: 'area' | 'content' | 'frame';
+  /** Number of contents inside an area node */
+  readonly contentCount?: number;
 }
 
 export interface CytoscapeNode {
@@ -59,7 +64,7 @@ export interface CytoscapeEdge {
   style?: Record<string, string | number>;
 }
 
-export type LayoutName = 'cose' | 'circle' | 'grid' | 'breadthfirst' | 'cose-bilkent';
+export type LayoutName = 'free' | 'cose' | 'circle' | 'grid' | 'breadthfirst' | 'cose-bilkent';
 
 export interface GraphViewState {
   readonly layout: LayoutName;
@@ -68,4 +73,35 @@ export interface GraphViewState {
   readonly zoomLevel: number;
   readonly panX: number;
   readonly panY: number;
+  readonly connectingFrom?: string; // node id when drawing arrow
+}
+
+// ============================================================
+// Graph Frames - Figma-style grouping regions
+// ============================================================
+
+export interface GraphFrame {
+  readonly id: string;
+  /** 'area' frames group area-level nodes, 'content' frames group content nodes within an area */
+  readonly level: 'area' | 'content';
+  /** When level='content', the areaId this frame belongs to */
+  readonly areaId?: string;
+  readonly title: string;
+  readonly position: Position;
+  readonly width: number;
+  readonly height: number;
+  readonly backgroundColor?: string;
+  readonly borderColor?: string;
+  readonly texts?: GraphFrameText[];
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export interface GraphFrameText {
+  readonly id: string;
+  readonly text: string;
+  readonly x: number;
+  readonly y: number;
+  readonly color?: string;
+  readonly fontSize?: number;
 }

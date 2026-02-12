@@ -8,12 +8,13 @@ import type { GraphViewState, LayoutName } from '../types/graph';
  * Default graph view state
  */
 export const DEFAULT_GRAPH_STATE: GraphViewState = {
-  layout: 'cose',
+  layout: 'free',
   selectedNodeId: undefined,
   hoveredNodeId: undefined,
   zoomLevel: 1,
   panX: 0,
   panY: 0,
+  connectingFrom: undefined,
 };
 
 /**
@@ -39,13 +40,13 @@ export const CYTOSCAPE_STYLE = [
   {
     selector: 'node',
     style: {
-      'background-color': GRAPH_COLORS.nodeDefault,
+      'background-color': 'data(color)',
       'border-color': GRAPH_COLORS.nodeBorder,
       'border-width': 2,
       'text-valign': 'bottom',
       'text-halign': 'center',
       'text-margin-y': 8,
-      label: 'data(label)',
+      label: 'data(title)',
       color: GRAPH_COLORS.text,
       'font-size': 12,
       'font-family': 'Arial, sans-serif',
@@ -54,6 +55,17 @@ export const CYTOSCAPE_STYLE = [
       shape: 'ellipse',
       'text-wrap': 'ellipsis',
       'text-max-width': '100px',
+      'z-index': 10,
+    },
+  },
+  // Node with emoji - show emoji inside via background-image SVG
+  {
+    selector: 'node[emojiImage]',
+    style: {
+      'background-image': 'data(emojiImage)',
+      'background-fit': 'contain',
+      'background-clip': 'node',
+      'background-image-opacity': 1,
     },
   },
   // Node hover state
@@ -103,6 +115,50 @@ export const CYTOSCAPE_STYLE = [
       width: 3,
     },
   },
+  // Node connecting source state (arrow tool)
+  {
+    selector: 'node.connecting-source',
+    style: {
+      'border-width': 4,
+      'border-color': '#ffbe0b',
+      'background-color': '#3a86ff',
+      'overlay-opacity': 0.15,
+      'overlay-color': '#ffbe0b',
+    },
+  },
+  // Area node style (larger, with content count label)
+  {
+    selector: 'node[nodeType = \"area\"]',
+    style: {
+      width: 70,
+      height: 70,
+      'font-size': 14,
+      'font-weight': 'bold',
+      'border-width': 3,
+      'border-style': 'double',
+      shape: 'round-rectangle',
+      'text-max-width': '120px',
+    },
+  },
+  // Frame node style (background region — below content nodes)
+  {
+    selector: 'node[nodeType = "frame"]',
+    style: {
+      shape: 'round-rectangle',
+      'background-opacity': 0.12,
+      'border-width': 2,
+      'border-style': 'dashed',
+      'border-opacity': 0.6,
+      'text-valign': 'top',
+      'text-halign': 'center',
+      'text-margin-y': -20,
+      'font-size': 13,
+      'font-weight': 'bold',
+      'text-wrap': 'none',
+      'z-index': 0,
+      'z-index-compare': 'manual',
+    },
+  },
 ];
 
 /**
@@ -110,6 +166,11 @@ export const CYTOSCAPE_STYLE = [
  * Using 'as const' for specific layouts with extended options
  */
 export const LAYOUT_OPTIONS: Record<LayoutName, object> = {
+  free: {
+    name: 'preset',
+    animate: false,
+    padding: 30,
+  },
   cose: {
     name: 'cose',
     animate: true,
@@ -164,6 +225,7 @@ export const GRAPH_DEFAULT_HEIGHT = 540;
  * Available layouts for UI selector
  */
 export const AVAILABLE_LAYOUTS: { name: LayoutName; label: string }[] = [
+  { name: 'free', label: 'Free (Manual)' },
   { name: 'cose', label: 'Force-Directed (COSE)' },
   { name: 'cose-bilkent', label: 'Force-Directed (CoSE-Bilkent)' },
   { name: 'circle', label: 'Circular' },

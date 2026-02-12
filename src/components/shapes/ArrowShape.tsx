@@ -12,13 +12,14 @@ import { SELECTION_COLOR } from '../../constants/canvas';
 interface ArrowShapeProps {
   shape: Shape;
   isSelected: boolean;
+  isDraggable: boolean;
   onSelect: () => void;
   onUpdate: (updates: Partial<Shape>) => void;
   onDragEnd: (position: Position) => void;
 }
 
 export const ArrowShape: React.FC<ArrowShapeProps> = React.memo(
-  ({ shape, isSelected, onSelect, onUpdate, onDragEnd }) => {
+  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragEnd }) => {
     const shapeRef = useRef<Konva.Arrow>(null);
     const transformerRef = useRef<Konva.Transformer>(null);
 
@@ -82,7 +83,7 @@ export const ArrowShape: React.FC<ArrowShapeProps> = React.memo(
           pointerWidth={10}
           lineCap="round"
           lineJoin="round"
-          draggable
+          draggable={isDraggable}
           onClick={onSelect}
           onTap={onSelect}
           onDragEnd={handleDragEnd}

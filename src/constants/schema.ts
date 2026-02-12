@@ -13,6 +13,7 @@ export function getDefaultState(): AppState {
     areas: [],
     contents: [],
     links: [],
+    graphFrames: [],
     graph: null,
     currentAreaId: undefined,
     currentContentId: undefined,

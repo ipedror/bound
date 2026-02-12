@@ -41,7 +41,7 @@ describe('useGraphView', () => {
     it('should return default graph view state', () => {
       const { result } = renderHook(() => useGraphView());
 
-      expect(result.current.graphViewState.layout).toBe('cose');
+      expect(result.current.graphViewState.layout).toBe('free');
       expect(result.current.graphViewState.zoomLevel).toBe(1);
       expect(result.current.selectedNodeId).toBeUndefined();
       expect(result.current.hoveredNodeId).toBeUndefined();
@@ -103,7 +103,7 @@ describe('useGraphView', () => {
     it('should change layout', () => {
       const { result } = renderHook(() => useGraphView());
 
-      expect(result.current.graphViewState.layout).toBe('cose');
+      expect(result.current.graphViewState.layout).toBe('free');
 
       act(() => {
         result.current.changeLayout('circle');
@@ -116,7 +116,7 @@ describe('useGraphView', () => {
       const { result } = renderHook(() => useGraphView());
 
       expect(result.current.currentLayoutConfig).toBeDefined();
-      expect((result.current.currentLayoutConfig as { name: string }).name).toBe('cose');
+      expect((result.current.currentLayoutConfig as { name: string }).name).toBe('preset');
 
       act(() => {
         result.current.changeLayout('grid');
@@ -207,7 +207,7 @@ describe('useGraphView', () => {
         result.current.resetView();
       });
 
-      expect(result.current.graphViewState.layout).toBe('cose');
+      expect(result.current.graphViewState.layout).toBe('free');
       expect(result.current.graphViewState.zoomLevel).toBe(1);
       expect(result.current.selectedNodeId).toBeUndefined();
       expect(result.current.hoveredNodeId).toBeUndefined();

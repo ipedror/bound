@@ -10,6 +10,7 @@ import type { Content } from '../types/content';
 import type { Shape } from '../types/shape';
 import type { Property } from '../types/property';
 import type { LinkType } from '../types/enums';
+import type { GraphFrame } from '../types/graph';
 import { getDefaultState, SCHEMA_VERSION } from '../constants/schema';
 import { ContentManager } from '../managers/ContentManager';
 import { AreaManager } from '../managers/AreaManager';
@@ -74,6 +75,14 @@ export interface AppStoreActions {
   // Navigation
   setCurrentAreaId: (areaId: string | undefined) => void;
   setCurrentContentId: (contentId: string | undefined) => void;
+
+  // Area node position
+  updateAreaNodePosition: (areaId: string, x: number, y: number) => void;
+
+  // Graph Frame operations
+  addGraphFrame: (frame: GraphFrame) => void;
+  updateGraphFrame: (frameId: string, updates: Partial<GraphFrame>) => void;
+  deleteGraphFrame: (frameId: string) => void;
 
   // Storage operations
   loadFromStorage: () => Promise<void>;
@@ -549,6 +558,52 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
       const newState = {
         ...state,
         currentContentId: contentId,
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
+    },
+
+    // Area node position
+    updateAreaNodePosition: (areaId: string, x: number, y: number) => {
+      const { state } = get();
+      const newState = {
+        ...state,
+        areas: state.areas.map((a) =>
+          a.id === areaId ? { ...a, nodePosition: { x, y }, updatedAt: Date.now() } : a,
+        ),
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
+    },
+
+    // Graph Frame operations
+    addGraphFrame: (frame: GraphFrame) => {
+      const { state } = get();
+      const newState = {
+        ...state,
+        graphFrames: [...(state.graphFrames ?? []), frame],
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
+    },
+
+    updateGraphFrame: (frameId: string, updates: Partial<GraphFrame>) => {
+      const { state } = get();
+      const newState = {
+        ...state,
+        graphFrames: (state.graphFrames ?? []).map((f) =>
+          f.id === frameId ? { ...f, ...updates, updatedAt: Date.now() } : f,
+        ),
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
+    },
+
+    deleteGraphFrame: (frameId: string) => {
+      const { state } = get();
+      const newState = {
+        ...state,
+        graphFrames: (state.graphFrames ?? []).filter((f) => f.id !== frameId),
         updatedAt: Date.now(),
       };
       get().setState(newState);

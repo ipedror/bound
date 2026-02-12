@@ -17,7 +17,6 @@ export type ToolType = (typeof ToolType)[keyof typeof ToolType];
 
 export interface CanvasState {
   readonly tool: ToolType;
-  readonly selectedShapeId?: string;
   readonly fillColor: string;
   readonly strokeColor: string;
   readonly strokeWidth: number;
@@ -25,6 +24,7 @@ export interface CanvasState {
   readonly fontSize: number;
   readonly fontColor: string;
   readonly opacity: number;
+  readonly textMaxWidth: number; // 0 = no limit
 }
 
 export interface CanvasHistory {

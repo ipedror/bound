@@ -6,20 +6,19 @@ import React, { useRef, useCallback, useState, useEffect } from 'react';
 import { Text, Transformer, Group, Rect } from 'react-konva';
 import type Konva from 'konva';
 import type { Shape } from '../../types/shape';
-import type { Position, Dimension } from '../../types/base';
+import type { Position } from '../../types/base';
 import { SELECTION_COLOR, MIN_SHAPE_SIZE } from '../../constants/canvas';
 
 interface TextShapeProps {
   shape: Shape;
-  isSelected: boolean;
-  onSelect: () => void;
+  isSelected: boolean;  isDraggable: boolean;  onSelect: (e?: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<Shape>) => void;
   onDragEnd: (position: Position) => void;
   onDoubleClick?: (shapeId: string) => void;
 }
 
 export const TextShape: React.FC<TextShapeProps> = React.memo(
-  ({ shape, isSelected, onSelect, onUpdate, onDragEnd, onDoubleClick }) => {
+  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragEnd, onDoubleClick }) => {
     const shapeRef = useRef<Konva.Text>(null);
     const transformerRef = useRef<Konva.Transformer>(null);
     const [isEditing, setIsEditing] = useState(false);
@@ -48,30 +47,28 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
       if (!node) return;
 
       const scaleX = node.scaleX();
-      const scaleY = node.scaleY();
 
       // Reset scale
       node.scaleX(1);
       node.scaleY(1);
 
-      const newDimension: Dimension = {
-        width: Math.max(MIN_SHAPE_SIZE, node.width() * scaleX),
-        height: Math.max(MIN_SHAPE_SIZE, node.height() * scaleY),
-      };
+      // Update maxWidth to new width so text wraps instead of hiding
+      const newMaxWidth = Math.max(MIN_SHAPE_SIZE, node.width() * scaleX);
+
+      // Temporarily set width so Konva can recalculate wrapped height
+      node.width(newMaxWidth);
+      node.wrap('word');
+      const newHeight = node.height();
 
       onUpdate({
         position: { x: node.x(), y: node.y() },
-        dimension: newDimension,
-        style: {
-          ...shape.style,
-          fontStyle: {
-            fontFamily: shape.style.fontStyle?.fontFamily ?? 'Arial',
-            fontSize: Math.round((shape.style.fontStyle?.fontSize ?? 16) * scaleY),
-            color: shape.style.fontStyle?.color ?? '#f1f1f1',
-          },
+        dimension: {
+          width: newMaxWidth,
+          height: Math.max(MIN_SHAPE_SIZE, newHeight),
         },
+        maxWidth: newMaxWidth,
       });
-    }, [onUpdate, shape.style]);
+    }, [onUpdate]);
 
     const handleDoubleClick = useCallback(() => {
       setIsEditing(true);
@@ -95,7 +92,7 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
       textarea.style.position = 'absolute';
       textarea.style.top = `${textPosition.y}px`;
       textarea.style.left = `${textPosition.x}px`;
-      textarea.style.width = `${textNode.width()}px`;
+      textarea.style.width = `${shape.maxWidth && shape.maxWidth > 0 ? shape.maxWidth : textNode.width()}px`;
       textarea.style.height = `${textNode.height() + 20}px`;
       textarea.style.fontSize = `${shape.style.fontStyle?.fontSize ?? 16}px`;
       textarea.style.fontFamily = shape.style.fontStyle?.fontFamily ?? 'Arial';
@@ -108,6 +105,8 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
       textarea.style.resize = 'none';
       textarea.style.overflow = 'hidden';
       textarea.style.zIndex = '1000';
+      textarea.style.wordBreak = shape.maxWidth && shape.maxWidth > 0 ? 'break-word' : 'normal';
+      textarea.style.whiteSpace = shape.maxWidth && shape.maxWidth > 0 ? 'pre-wrap' : 'nowrap';
 
       textarea.focus();
       textarea.select();
@@ -155,13 +154,14 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
           id={shape.id}
           x={shape.position.x}
           y={shape.position.y}
-          width={shape.dimension.width}
+          width={shape.maxWidth && shape.maxWidth > 0 ? shape.maxWidth : undefined}
+          wrap={shape.maxWidth && shape.maxWidth > 0 ? 'word' : 'none'}
           text={shape.text ?? 'Text'}
           fill={shape.style.fill ?? fontStyle?.color ?? '#f1f1f1'}
           fontSize={fontStyle?.fontSize ?? 16}
           fontFamily={fontStyle?.fontFamily ?? 'Arial'}
           opacity={shape.style.opacity ?? 1}
-          draggable
+          draggable={isDraggable}
           onClick={onSelect}
           onTap={onSelect}
           onDblClick={handleDoubleClick}

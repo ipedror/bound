@@ -116,9 +116,17 @@ export class ShapeFactory {
     position: Position,
     state: CanvasState,
   ): Shape {
+    const maxWidth = state.textMaxWidth > 0 ? state.textMaxWidth : 0;
     // Approximate dimension based on text length and font size
-    const estimatedWidth = Math.max(text.length * state.fontSize * 0.6, 50);
-    const estimatedHeight = state.fontSize * 1.5;
+    const estimatedWidth = maxWidth > 0
+      ? maxWidth
+      : Math.max(text.length * state.fontSize * 0.6, 50);
+    // Estimate line count for wrapped text
+    const charsPerLine = maxWidth > 0
+      ? Math.max(Math.floor(maxWidth / (state.fontSize * 0.6)), 1)
+      : text.length;
+    const lineCount = Math.max(Math.ceil(text.length / charsPerLine), 1);
+    const estimatedHeight = state.fontSize * 1.5 * lineCount;
 
     return {
       id: generateId(),
@@ -140,6 +148,7 @@ export class ShapeFactory {
         opacity: state.opacity,
       },
       text,
+      ...(maxWidth > 0 ? { maxWidth } : {}),
       createdAt: Date.now(),
     };
   }

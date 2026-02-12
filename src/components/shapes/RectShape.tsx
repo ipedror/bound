@@ -12,13 +12,14 @@ import { SELECTION_COLOR, MIN_SHAPE_SIZE } from '../../constants/canvas';
 interface RectShapeProps {
   shape: Shape;
   isSelected: boolean;
+  isDraggable: boolean;
   onSelect: () => void;
   onUpdate: (updates: Partial<Shape>) => void;
   onDragEnd: (position: Position) => void;
 }
 
 export const RectShape: React.FC<RectShapeProps> = React.memo(
-  ({ shape, isSelected, onSelect, onUpdate, onDragEnd }) => {
+  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragEnd }) => {
     const shapeRef = useRef<Konva.Rect>(null);
     const transformerRef = useRef<Konva.Transformer>(null);
 
@@ -76,7 +77,7 @@ export const RectShape: React.FC<RectShapeProps> = React.memo(
           stroke={isSelected ? SELECTION_COLOR : shape.style.stroke}
           strokeWidth={shape.style.strokeWidth ?? 2}
           opacity={shape.style.opacity ?? 1}
-          draggable
+          draggable={isDraggable}
           onClick={onSelect}
           onTap={onSelect}
           onDragEnd={handleDragEnd}

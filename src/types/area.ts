@@ -8,6 +8,9 @@ export interface Area {
   readonly description?: string;
   readonly contentIds: string[];
   readonly backgroundColor?: string;
+  readonly nodePosition?: { readonly x: number; readonly y: number };
+  readonly emoji?: string;
+  readonly nodeColor?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

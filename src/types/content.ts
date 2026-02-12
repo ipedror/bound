@@ -17,6 +17,7 @@ export interface Content {
   };
   readonly properties: Property[];
   readonly emoji?: string;
+  readonly nodeColor?: string;
   readonly nodePosition?: Position;
   readonly createdAt: number;
   readonly updatedAt: number;

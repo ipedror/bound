@@ -14,6 +14,7 @@ export const DEFAULT_CANVAS_STATE: CanvasState = {
   fontSize: 16,
   fontColor: '#f1f1f1',
   opacity: 1,
+  textMaxWidth: 0,
 };
 
 export const WEB_SAFE_FONTS = [

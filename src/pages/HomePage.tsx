@@ -133,8 +133,9 @@ export default function HomePage() {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: '24px',
-    minHeight: 'calc(100vh - 60px)',
+    padding: '64px 24px 24px 64px',
+    minHeight: '100vh',
+    backgroundColor: '#0f172a',
   },
   header: {
     display: 'flex',

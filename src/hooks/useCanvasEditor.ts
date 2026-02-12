@@ -17,7 +17,7 @@ export interface UseCanvasEditorReturn {
   // State
   canvasState: CanvasState;
   shapes: Shape[];
-  selectedShapeId: string | undefined;
+  selectedShapeIds: string[];
   isDrawing: boolean;
 
   // State setters
@@ -29,7 +29,9 @@ export interface UseCanvasEditorReturn {
   setOpacity: (opacity: number) => void;
   setFontFamily: (family: string) => void;
   setFontSize: (size: number) => void;
-  setSelectedShapeId: (id: string | undefined) => void;
+  setTextMaxWidth: (maxWidth: number) => void;
+  setSelectedShapeIds: React.Dispatch<React.SetStateAction<string[]>>;
+  toggleShapeSelection: (id: string) => void;
 
   // Shape operations
   addShape: (shape: Shape) => void;
@@ -63,7 +65,7 @@ export function useCanvasEditor(
 
   // Local canvas state
   const [canvasState, setCanvasState] = useState<CanvasState>(DEFAULT_CANVAS_STATE);
-  const [selectedShapeId, setSelectedShapeId] = useState<string | undefined>();
+  const [selectedShapeIds, setSelectedShapeIds] = useState<string[]>([]);
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -97,7 +99,7 @@ export function useCanvasEditor(
   // State setters
   const setTool = useCallback((tool: ToolType) => {
     setCanvasState((prev) => ({ ...prev, tool }));
-    setSelectedShapeId(undefined); // Clear selection when changing tools
+    setSelectedShapeIds([]); // Clear selection when changing tools
   }, []);
 
   const setFillColor = useCallback((fillColor: string) => {
@@ -124,6 +126,17 @@ export function useCanvasEditor(
     setCanvasState((prev) => ({ ...prev, fontSize }));
   }, []);
 
+  const setTextMaxWidth = useCallback((textMaxWidth: number) => {
+    setCanvasState((prev) => ({ ...prev, textMaxWidth }));
+  }, []);
+
+  // Toggle shape in/out of selection (for Shift+click multi-select)
+  const toggleShapeSelection = useCallback((id: string) => {
+    setSelectedShapeIds((prev) =>
+      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id],
+    );
+  }, []);
+
   // Shape operations
   const addShape = useCallback(
     (shape: Shape) => {
@@ -140,12 +153,10 @@ export function useCanvasEditor(
       const newShapes = localShapes.filter((s) => s.id !== shapeId);
       setLocalShapes(newShapes);
       setHistory((h) => CanvasUndoRedoManager.push(newShapes, h));
-      if (selectedShapeId === shapeId) {
-        setSelectedShapeId(undefined);
-      }
+      setSelectedShapeIds((prev) => prev.filter((id) => id !== shapeId));
       pendingCommit.current = true;
     },
-    [localShapes, selectedShapeId],
+    [localShapes],
   );
 
   const updateShape = useCallback(
@@ -186,7 +197,7 @@ export function useCanvasEditor(
   const clearAllShapes = useCallback(() => {
     setLocalShapes([]);
     setHistory((h) => CanvasUndoRedoManager.push([], h));
-    setSelectedShapeId(undefined);
+    setSelectedShapeIds([]);
     pendingCommit.current = true;
   }, []);
 
@@ -297,7 +308,7 @@ export function useCanvasEditor(
   return {
     canvasState,
     shapes,
-    selectedShapeId,
+    selectedShapeIds,
     isDrawing,
     setCanvasState,
     setTool,
@@ -307,7 +318,9 @@ export function useCanvasEditor(
     setOpacity,
     setFontFamily,
     setFontSize,
-    setSelectedShapeId,
+    setTextMaxWidth,
+    setSelectedShapeIds,
+    toggleShapeSelection,
     addShape,
     removeShape,
     updateShape,

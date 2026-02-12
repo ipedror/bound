@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/shallow';
 import { useAppStore } from '../store/appStore';
 import { GraphManager, type GraphData } from '../managers/GraphManager';
 import { DEFAULT_GRAPH_STATE, LAYOUT_OPTIONS } from '../constants/graph';
+import { LinkType } from '../types/enums';
 import type { GraphViewState, LayoutName, CytoscapeNode, CytoscapeEdge } from '../types/graph';
 import type { Position } from '../types/base';
 
@@ -30,6 +31,13 @@ export interface UseGraphViewReturn {
   resetView: () => void;
   fit: () => void;
   
+  // Arrow connection
+  isConnecting: boolean;
+  connectingFrom: string | undefined;
+  startConnecting: (nodeId: string) => void;
+  finishConnecting: (targetNodeId: string) => void;
+  cancelConnecting: () => void;
+  
   // Layout options
   layoutOptions: typeof LAYOUT_OPTIONS;
   currentLayoutConfig: object;
@@ -40,10 +48,11 @@ export interface UseGraphViewReturn {
  * @param areaId - Optional area ID to filter the graph by
  */
 export function useGraphView(areaId?: string): UseGraphViewReturn {
-  const { state, setState } = useAppStore(
+  const { state, setState, createLink } = useAppStore(
     useShallow((s) => ({
       state: s.state,
       setState: s.setState,
+      createLink: s.createLink,
     })),
   );
 
@@ -101,9 +110,41 @@ export function useGraphView(areaId?: string): UseGraphViewReturn {
     }));
   }, []);
 
+  // Arrow connection state
+  const isConnecting = !!graphViewState.connectingFrom;
+  const connectingFrom = graphViewState.connectingFrom;
+
+  const startConnecting = useCallback((nodeId: string) => {
+    setGraphViewState((prev) => ({
+      ...prev,
+      connectingFrom: nodeId,
+    }));
+  }, []);
+
+  const finishConnecting = useCallback((targetNodeId: string) => {
+    const fromId = graphViewState.connectingFrom;
+    if (!fromId || fromId === targetNodeId) {
+      setGraphViewState((prev) => ({ ...prev, connectingFrom: undefined }));
+      return;
+    }
+    
+    // Create a MANUAL link between the two content nodes
+    try {
+      createLink(fromId, targetNodeId, LinkType.MANUAL);
+    } catch {
+      // Link may already exist or be invalid — silently ignore
+    }
+    
+    setGraphViewState((prev) => ({ ...prev, connectingFrom: undefined }));
+  }, [graphViewState.connectingFrom, createLink]);
+
+  const cancelConnecting = useCallback(() => {
+    setGraphViewState((prev) => ({ ...prev, connectingFrom: undefined }));
+  }, []);
+
   // Get current layout configuration
   const currentLayoutConfig = useMemo(() => {
-    return LAYOUT_OPTIONS[graphViewState.layout] || LAYOUT_OPTIONS.cose;
+    return LAYOUT_OPTIONS[graphViewState.layout] || LAYOUT_OPTIONS.free;
   }, [graphViewState.layout]);
 
   return {
@@ -125,6 +166,13 @@ export function useGraphView(areaId?: string): UseGraphViewReturn {
     zoom,
     resetView,
     fit,
+    
+    // Arrow connection
+    isConnecting,
+    connectingFrom,
+    startConnecting,
+    finishConnecting,
+    cancelConnecting,
     
     // Layout options
     layoutOptions: LAYOUT_OPTIONS,

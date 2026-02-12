@@ -50,6 +50,16 @@ describe('ContentPage', () => {
     );
   };
 
+  /** Click the floating Properties toggle button to open its dropdown */
+  const openPropsPanel = () => {
+    fireEvent.click(screen.getByTitle('Properties'));
+  };
+
+  /** Click the floating Links toggle button to open its dropdown */
+  const openLinksPanel = () => {
+    fireEvent.click(screen.getByTitle('Links'));
+  };
+
   describe('Rendering', () => {
     it('should render without crashing', () => {
       const { container } = renderContentPage();
@@ -72,14 +82,14 @@ describe('ContentPage', () => {
       expect(screen.getByTestId('canvas-editor')).toBeInTheDocument();
     });
 
-    it('should render properties section', () => {
+    it('should render properties toggle button', () => {
       renderContentPage();
-      expect(screen.getByText('Properties')).toBeInTheDocument();
+      expect(screen.getByTitle('Properties')).toBeInTheDocument();
     });
 
-    it('should render links section', () => {
+    it('should render links toggle button', () => {
       renderContentPage();
-      expect(screen.getByText('Links')).toBeInTheDocument();
+      expect(screen.getByTitle('Links')).toBeInTheDocument();
     });
 
     it('should show not found for invalid content id', () => {
@@ -121,30 +131,32 @@ describe('ContentPage', () => {
   });
 
   describe('Properties', () => {
-    it('should show "No properties" when content has no properties', () => {
+    it('should show "No properties" when opening properties panel', () => {
       renderContentPage();
+      openPropsPanel();
       expect(screen.getByText('No properties')).toBeInTheDocument();
     });
 
     it('should open property modal when clicking add button', () => {
       renderContentPage();
-      const addButtons = screen.getAllByText('+');
-      fireEvent.click(addButtons[0]); // First + is for properties
+      openPropsPanel();
+      const addBtn = screen.getByText('+');
+      fireEvent.click(addBtn);
       expect(screen.getByText('Add Property')).toBeInTheDocument();
     });
 
     it('should close property modal when clicking cancel', () => {
       renderContentPage();
-      const addButtons = screen.getAllByText('+');
-      fireEvent.click(addButtons[0]);
+      openPropsPanel();
+      fireEvent.click(screen.getByText('+'));
       fireEvent.click(screen.getByText('Cancel'));
       expect(screen.queryByText('Add Property')).not.toBeInTheDocument();
     });
 
     it('should add property when submitting valid name', async () => {
       renderContentPage();
-      const addButtons = screen.getAllByText('+');
-      fireEvent.click(addButtons[0]);
+      openPropsPanel();
+      fireEvent.click(screen.getByText('+'));
       
       const input = screen.getByPlaceholderText('Property name');
       fireEvent.change(input, { target: { value: 'Test Property' } });
@@ -157,8 +169,9 @@ describe('ContentPage', () => {
   });
 
   describe('Links', () => {
-    it('should show "No links" when content has no links', () => {
+    it('should show "No links" when opening links panel', () => {
       renderContentPage();
+      openLinksPanel();
       expect(screen.getByText('No links')).toBeInTheDocument();
     });
 
@@ -167,9 +180,9 @@ describe('ContentPage', () => {
       useAppStore.getState().createContent(areaId, 'Other Content');
       
       renderContentPage();
-      const addButtons = screen.getAllByText('+');
-      // Find the link add button (second +)
-      fireEvent.click(addButtons[1]);
+      openLinksPanel();
+      const addBtn = screen.getByText('+');
+      fireEvent.click(addBtn);
       expect(screen.getByText('Link to Content')).toBeInTheDocument();
     });
 
@@ -177,8 +190,8 @@ describe('ContentPage', () => {
       useAppStore.getState().createContent(areaId, 'Linkable Content');
       
       renderContentPage();
-      const addButtons = screen.getAllByText('+');
-      fireEvent.click(addButtons[1]);
+      openLinksPanel();
+      fireEvent.click(screen.getByText('+'));
       
       expect(screen.getByText('Linkable Content')).toBeInTheDocument();
     });
@@ -187,8 +200,8 @@ describe('ContentPage', () => {
       useAppStore.getState().createContent(areaId, 'Linkable Content');
       
       renderContentPage();
-      const addButtons = screen.getAllByText('+');
-      fireEvent.click(addButtons[1]);
+      openLinksPanel();
+      fireEvent.click(screen.getByText('+'));
       
       const linkOption = screen.getByText('Linkable Content');
       fireEvent.click(linkOption);
@@ -211,13 +224,15 @@ describe('ContentPage', () => {
       useAppStore.getState().createLink(contentId, otherContentId, 'manual');
     });
 
-    it('should display linked content', () => {
+    it('should display linked content when opening links panel', () => {
       renderContentPage();
+      openLinksPanel();
       expect(screen.getByText('Linked Content')).toBeInTheDocument();
     });
 
     it('should navigate to linked content when clicking on it', () => {
       renderContentPage();
+      openLinksPanel();
       const linkedContent = screen.getByText('Linked Content');
       fireEvent.click(linkedContent);
       
@@ -226,6 +241,7 @@ describe('ContentPage', () => {
 
     it('should delete link when clicking remove button', () => {
       renderContentPage();
+      openLinksPanel();
       // Get the remove button in the links section
       const removeButtons = screen.getAllByText('×');
       const linkRemoveButton = removeButtons[removeButtons.length - 1];

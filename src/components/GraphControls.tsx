@@ -1,8 +1,9 @@
 // ============================================================
-// GraphControls - Controls for GraphView (layout, zoom, etc.)
+// GraphControls - Excalidraw-style compact controls
 // ============================================================
 
 import { memo } from 'react';
+import { Island } from './Island';
 import type { LayoutName } from '../types/graph';
 import { AVAILABLE_LAYOUTS } from '../constants/graph';
 
@@ -14,65 +15,38 @@ export interface GraphControlsProps {
   onResetView: () => void;
   onFit?: () => void;
   disabled?: boolean;
+  /** Layer mode toggle */
+  layerMode?: boolean;
+  onToggleLayerMode?: (enabled: boolean) => void;
+  /** Whether we are drilled into an area */
+  drillAreaName?: string;
+  onBackToAreas?: () => void;
 }
 
 /**
- * GraphControls - UI controls for the GraphView component
+ * GraphControls - Compact Island panel for graph settings
  */
 export const GraphControls = memo(function GraphControls({
   currentLayout,
   onChangeLayout,
-  onZoomIn,
-  onZoomOut,
   onResetView,
-  onFit,
   disabled = false,
+  layerMode,
+  onToggleLayerMode,
+  drillAreaName,
+  onBackToAreas,
 }: GraphControlsProps) {
   return (
-    <div
-      className="graph-controls"
-      style={{
-        position: 'absolute',
-        top: '1rem',
-        right: '1rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.5rem',
-        padding: '0.75rem',
-        backgroundColor: 'rgba(13, 13, 26, 0.9)',
-        borderRadius: '8px',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        zIndex: 1000,
-      }}
-    >
-      {/* Layout Selector */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-        <label
-          htmlFor="layout-select"
-          style={{
-            fontSize: '0.75rem',
-            color: 'rgba(255, 255, 255, 0.6)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}
-        >
-          Layout
-        </label>
+    <Island padding={8} style={styles.container}>
+      {/* Layout selector */}
+      <div style={styles.section}>
+        <label style={styles.label} htmlFor="layout-select">Layout</label>
         <select
           id="layout-select"
           value={currentLayout}
           onChange={(e) => onChangeLayout(e.target.value as LayoutName)}
           disabled={disabled}
-          style={{
-            padding: '0.5rem',
-            borderRadius: '4px',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-            color: '#f1f1f1',
-            fontSize: '0.85rem',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            minWidth: '140px',
-          }}
+          style={styles.select}
         >
           {AVAILABLE_LAYOUTS.map((layout) => (
             <option key={layout.name} value={layout.name}>
@@ -82,119 +56,144 @@ export const GraphControls = memo(function GraphControls({
         </select>
       </div>
 
-      {/* Zoom Controls */}
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
-        <button
-          onClick={onZoomIn}
-          disabled={disabled}
-          title="Zoom In"
-          style={{
-            flex: 1,
-            padding: '0.5rem',
-            borderRadius: '4px',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            backgroundColor: 'rgba(56, 189, 248, 0.2)',
-            color: '#38bdf8',
-            fontSize: '1rem',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            transition: 'background-color 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            if (!disabled) {
-              e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.4)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.2)';
-          }}
-        >
-          +
-        </button>
-        <button
-          onClick={onZoomOut}
-          disabled={disabled}
-          title="Zoom Out"
-          style={{
-            flex: 1,
-            padding: '0.5rem',
-            borderRadius: '4px',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            backgroundColor: 'rgba(56, 189, 248, 0.2)',
-            color: '#38bdf8',
-            fontSize: '1rem',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            transition: 'background-color 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            if (!disabled) {
-              e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.4)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.2)';
-          }}
-        >
-          −
-        </button>
-      </div>
+      {/* Layer mode toggle */}
+      {onToggleLayerMode !== undefined && (
+        <>
+          <div style={styles.divider} />
+          <div style={styles.section}>
+            <label style={styles.label}>Layers</label>
+            <button
+              style={{
+                ...styles.toggleButton,
+                ...(layerMode ? styles.toggleButtonActive : {}),
+              }}
+              onClick={() => onToggleLayerMode(!layerMode)}
+              title={layerMode ? 'Switch to all contents' : 'Switch to area layers'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                <polyline points="2 17 12 22 22 17" />
+                <polyline points="2 12 12 17 22 12" />
+              </svg>
+              {layerMode ? 'Areas' : 'Contents'}
+            </button>
+          </div>
+        </>
+      )}
 
-      {/* Fit and Reset Buttons */}
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
-        {onFit && (
+      {/* Back to areas button (when drilled into an area) */}
+      {drillAreaName && onBackToAreas && (
+        <>
+          <div style={styles.divider} />
           <button
-            onClick={onFit}
-            disabled={disabled}
-            title="Fit to View"
-            style={{
-              flex: 1,
-              padding: '0.5rem',
-              borderRadius: '4px',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              backgroundColor: 'rgba(131, 56, 236, 0.2)',
-              color: '#8338ec',
-              fontSize: '0.8rem',
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              transition: 'background-color 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              if (!disabled) {
-                e.currentTarget.style.backgroundColor = 'rgba(131, 56, 236, 0.4)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(131, 56, 236, 0.2)';
-            }}
+            onClick={onBackToAreas}
+            style={styles.backButton}
+            title="Back to area view"
           >
-            Fit
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            ← {drillAreaName}
           </button>
-        )}
-        <button
-          onClick={onResetView}
-          disabled={disabled}
-          title="Reset View"
-          style={{
-            flex: 1,
-            padding: '0.5rem',
-            borderRadius: '4px',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            backgroundColor: 'rgba(255, 190, 11, 0.2)',
-            color: '#ffbe0b',
-            fontSize: '0.8rem',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            transition: 'background-color 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            if (!disabled) {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 190, 11, 0.4)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 190, 11, 0.2)';
-          }}
-        >
-          Reset
-        </button>
-      </div>
-    </div>
+        </>
+      )}
+
+      <div style={styles.divider} />
+
+      {/* Reset */}
+      <button
+        onClick={onResetView}
+        disabled={disabled}
+        style={styles.resetButton}
+        title="Reset View"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="1 4 1 10 7 10" />
+          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+        </svg>
+        Reset
+      </button>
+    </Island>
   );
 });
+
+const styles: Record<string, React.CSSProperties> = {
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    minWidth: '160px',
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  label: {
+    fontSize: '10px',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    fontWeight: 600,
+  },
+  select: {
+    padding: '6px 8px',
+    borderRadius: '6px',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    backgroundColor: '#0f172a',
+    color: '#e2e8f0',
+    fontSize: '12px',
+    cursor: 'pointer',
+  },
+  divider: {
+    height: '1px',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  toggleButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 8px',
+    backgroundColor: 'transparent',
+    color: '#94a3b8',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '6px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  toggleButtonActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    color: '#38bdf8',
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+  },
+  backButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '6px 8px',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    color: '#a78bfa',
+    border: '1px solid rgba(139, 92, 246, 0.3)',
+    borderRadius: '6px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  resetButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 8px',
+    backgroundColor: 'transparent',
+    color: '#94a3b8',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '6px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+};

@@ -1,8 +1,9 @@
 // ============================================================
-// CanvasToolbar - Toolbar for canvas editor
+// CanvasToolbar - Excalidraw-style floating toolbar
 // ============================================================
 
 import React, { useCallback } from 'react';
+import { Island } from './Island';
 import { ColorPicker } from './ColorPicker';
 import { FontSelector } from './FontSelector';
 import { ToolType } from '../types/canvas';
@@ -17,6 +18,7 @@ interface CanvasToolbarProps {
   onSetOpacity: (opacity: number) => void;
   onSetFontFamily: (family: string) => void;
   onSetFontSize: (size: number) => void;
+  onSetTextMaxWidth: (maxWidth: number) => void;
   canUndo: boolean;
   onUndo: () => void;
   canRedo: boolean;
@@ -28,16 +30,17 @@ interface ToolButtonConfig {
   tool: ToolType;
   label: string;
   icon: string;
+  shortcut?: string;
 }
 
 const TOOL_BUTTONS: ToolButtonConfig[] = [
-  { tool: ToolType.SELECT, label: 'Select', icon: '⬚' },
-  { tool: ToolType.RECT, label: 'Rectangle', icon: '▭' },
-  { tool: ToolType.ELLIPSE, label: 'Ellipse', icon: '○' },
-  { tool: ToolType.LINE, label: 'Line', icon: '╱' },
-  { tool: ToolType.ARROW, label: 'Arrow', icon: '→' },
-  { tool: ToolType.TEXT, label: 'Text', icon: 'T' },
-  { tool: ToolType.ERASER, label: 'Eraser', icon: '✕' },
+  { tool: ToolType.SELECT, label: 'Select', icon: '⬚', shortcut: 'V' },
+  { tool: ToolType.RECT, label: 'Rectangle', icon: '▭', shortcut: 'R' },
+  { tool: ToolType.ELLIPSE, label: 'Ellipse', icon: '○', shortcut: 'O' },
+  { tool: ToolType.LINE, label: 'Line', icon: '╱', shortcut: 'L' },
+  { tool: ToolType.ARROW, label: 'Arrow', icon: '→', shortcut: 'A' },
+  { tool: ToolType.TEXT, label: 'Text', icon: 'T', shortcut: 'T' },
+  { tool: ToolType.ERASER, label: 'Eraser', icon: '✕', shortcut: 'E' },
 ];
 
 export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(
@@ -50,6 +53,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(
     onSetOpacity,
     onSetFontFamily,
     onSetFontSize,
+    onSetTextMaxWidth,
     canUndo,
     onUndo,
     canRedo,
@@ -70,13 +74,19 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(
       [onSetOpacity],
     );
 
+    const handleTextMaxWidthChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        onSetTextMaxWidth(Number(e.target.value));
+      },
+      [onSetTextMaxWidth],
+    );
+
     return (
-      <div className="canvas-toolbar" style={styles.toolbar}>
-        {/* Tools Section */}
-        <div style={styles.section}>
-          <span style={styles.sectionLabel}>Tools</span>
-          <div style={styles.toolButtons}>
-            {TOOL_BUTTONS.map(({ tool, label, icon }) => (
+      <>
+        {/* Top-center: Tool selector */}
+        <div style={overlayStyles.topCenter}>
+          <Island padding={6} style={{ display: 'flex', gap: '2px' }}>
+            {TOOL_BUTTONS.map(({ tool, label, icon, shortcut }) => (
               <button
                 key={tool}
                 type="button"
@@ -92,92 +102,18 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(
                 {icon}
               </button>
             ))}
-          </div>
-        </div>
 
-        {/* Divider */}
-        <div style={styles.divider} />
-
-        {/* Colors Section */}
-        <div style={styles.section}>
-          <span style={styles.sectionLabel}>Colors</span>
-          <div style={styles.colorsRow}>
-            <ColorPicker
-              color={canvasState.fillColor}
-              onChange={onSetFillColor}
-              label="Fill"
-            />
-            <ColorPicker
-              color={canvasState.strokeColor}
-              onChange={onSetStrokeColor}
-              label="Stroke"
-            />
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div style={styles.divider} />
-
-        {/* Stroke & Opacity Section */}
-        <div style={styles.section}>
-          <span style={styles.sectionLabel}>Style</span>
-          <div style={styles.slidersRow}>
-            <label style={styles.sliderLabel}>
-              Width: {canvasState.strokeWidth}
-              <input
-                type="range"
-                min={1}
-                max={20}
-                value={canvasState.strokeWidth}
-                onChange={handleStrokeWidthChange}
-                style={styles.slider}
-              />
-            </label>
-            <label style={styles.sliderLabel}>
-              Opacity: {Math.round(canvasState.opacity * 100)}%
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.1}
-                value={canvasState.opacity}
-                onChange={handleOpacityChange}
-                style={styles.slider}
-              />
-            </label>
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div style={styles.divider} />
-
-        {/* Font Section (visible for text tool) */}
-        {canvasState.tool === ToolType.TEXT && (
-          <>
-            <div style={styles.section}>
-              <span style={styles.sectionLabel}>Text</span>
-              <FontSelector
-                fontFamily={canvasState.fontFamily}
-                fontSize={canvasState.fontSize}
-                onFontFamilyChange={onSetFontFamily}
-                onFontSizeChange={onSetFontSize}
-              />
-            </div>
+            {/* Divider */}
             <div style={styles.divider} />
-          </>
-        )}
 
-        {/* History Section */}
-        <div style={styles.section}>
-          <span style={styles.sectionLabel}>History</span>
-          <div style={styles.historyButtons}>
+            {/* Undo/Redo */}
             <button
               type="button"
               onClick={onUndo}
               disabled={!canUndo}
               style={{
-                ...styles.actionButton,
-                ...(canUndo ? {} : styles.actionButtonDisabled),
+                ...styles.toolButton,
+                ...(canUndo ? {} : styles.toolButtonDisabled),
               }}
               title="Undo (Ctrl+Z)"
               aria-label="Undo"
@@ -189,142 +125,201 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(
               onClick={onRedo}
               disabled={!canRedo}
               style={{
-                ...styles.actionButton,
-                ...(canRedo ? {} : styles.actionButtonDisabled),
+                ...styles.toolButton,
+                ...(canRedo ? {} : styles.toolButtonDisabled),
               }}
               title="Redo (Ctrl+Shift+Z)"
               aria-label="Redo"
             >
               ↷
             </button>
-          </div>
+
+            {/* Divider */}
+            <div style={styles.divider} />
+
+            {/* Clear All */}
+            <button
+              type="button"
+              onClick={onClearAll}
+              style={styles.clearButton}
+              title="Clear All"
+              aria-label="Clear All Shapes"
+            >
+              🗑
+            </button>
+          </Island>
         </div>
 
-        {/* Spacer */}
-        <div style={styles.spacer} />
+        {/* Left side panel: Colors + Style */}
+        <div style={overlayStyles.leftPanel}>
+          <Island padding={12} style={{ display: 'flex', flexDirection: 'column', gap: '10px', minWidth: '160px' }}>
+            {/* Colors Section */}
+            <div style={styles.section}>
+              <span style={styles.sectionLabel}>Colors</span>
+              <div style={styles.colorsRow}>
+                <ColorPicker
+                  color={canvasState.fillColor}
+                  onChange={onSetFillColor}
+                  label="Fill"
+                />
+                <ColorPicker
+                  color={canvasState.strokeColor}
+                  onChange={onSetStrokeColor}
+                  label="Stroke"
+                />
+              </div>
+            </div>
 
-        {/* Clear All */}
-        <button
-          type="button"
-          onClick={onClearAll}
-          style={styles.clearButton}
-          title="Clear All"
-          aria-label="Clear All Shapes"
-        >
-          🗑 Clear All
-        </button>
-      </div>
+            {/* Stroke & Opacity */}
+            <div style={styles.section}>
+              <span style={styles.sectionLabel}>Style</span>
+              <label style={styles.sliderLabel}>
+                Width: {canvasState.strokeWidth}
+                <input
+                  type="range"
+                  min={1}
+                  max={20}
+                  value={canvasState.strokeWidth}
+                  onChange={handleStrokeWidthChange}
+                  style={styles.slider}
+                />
+              </label>
+              <label style={styles.sliderLabel}>
+                Opacity: {Math.round(canvasState.opacity * 100)}%
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  value={canvasState.opacity}
+                  onChange={handleOpacityChange}
+                  style={styles.slider}
+                />
+              </label>
+            </div>
+
+            {/* Font Section (visible for text tool) */}
+            {canvasState.tool === ToolType.TEXT && (
+              <div style={styles.section}>
+                <span style={styles.sectionLabel}>Text</span>
+                <FontSelector
+                  fontFamily={canvasState.fontFamily}
+                  fontSize={canvasState.fontSize}
+                  onFontFamilyChange={onSetFontFamily}
+                  onFontSizeChange={onSetFontSize}
+                />
+                <label style={styles.sliderLabel}>
+                  Max Width: {canvasState.textMaxWidth === 0 ? 'Auto' : `${canvasState.textMaxWidth}px`}
+                  <input
+                    type="range"
+                    min={0}
+                    max={800}
+                    step={10}
+                    value={canvasState.textMaxWidth}
+                    onChange={handleTextMaxWidthChange}
+                    style={styles.slider}
+                  />
+                </label>
+              </div>
+            )}
+          </Island>
+        </div>
+      </>
     );
   },
 );
 
 CanvasToolbar.displayName = 'CanvasToolbar';
 
-const styles: Record<string, React.CSSProperties> = {
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '8px 16px',
-    backgroundColor: '#1e1e2e',
-    borderTop: '1px solid #333',
-    flexWrap: 'wrap',
+const overlayStyles: Record<string, React.CSSProperties> = {
+  topCenter: {
+    position: 'absolute',
+    top: '12px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 100,
   },
+  leftPanel: {
+    position: 'absolute',
+    top: '50%',
+    left: '12px',
+    transform: 'translateY(-50%)',
+    zIndex: 50,
+  },
+};
+
+const styles: Record<string, React.CSSProperties> = {
   section: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '4px',
+    gap: '6px',
   },
   sectionLabel: {
     fontSize: '10px',
-    color: '#666',
+    color: '#64748b',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
-  },
-  toolButtons: {
-    display: 'flex',
-    gap: '4px',
+    fontWeight: 600,
   },
   toolButton: {
-    width: '32px',
-    height: '32px',
+    width: '36px',
+    height: '36px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#2a2a3e',
-    color: '#f1f1f1',
-    border: '1px solid #444',
-    borderRadius: '4px',
+    backgroundColor: 'transparent',
+    color: '#e2e8f0',
+    border: '1px solid transparent',
+    borderRadius: '8px',
     cursor: 'pointer',
     fontSize: '16px',
     transition: 'all 0.15s ease',
   },
   toolButtonActive: {
-    backgroundColor: '#00d4ff',
-    color: '#1a1a2e',
-    borderColor: '#00d4ff',
+    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+    borderColor: '#38bdf8',
+    color: '#38bdf8',
+  },
+  toolButtonDisabled: {
+    opacity: 0.35,
+    cursor: 'not-allowed',
   },
   divider: {
     width: '1px',
-    height: '40px',
-    backgroundColor: '#444',
+    height: '28px',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignSelf: 'center',
+    margin: '0 2px',
   },
   colorsRow: {
     display: 'flex',
     gap: '8px',
-  },
-  slidersRow: {
-    display: 'flex',
-    gap: '16px',
   },
   sliderLabel: {
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
     fontSize: '10px',
-    color: '#aaa',
-    minWidth: '80px',
+    color: '#94a3b8',
   },
   slider: {
     width: '100%',
     height: '4px',
     cursor: 'pointer',
-    accentColor: '#00d4ff',
+    accentColor: '#38bdf8',
   },
-  historyButtons: {
-    display: 'flex',
-    gap: '4px',
-  },
-  actionButton: {
-    width: '32px',
-    height: '32px',
+  clearButton: {
+    width: '36px',
+    height: '36px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#2a2a3e',
-    color: '#f1f1f1',
-    border: '1px solid #444',
-    borderRadius: '4px',
+    backgroundColor: 'transparent',
+    color: '#ef4444',
+    border: '1px solid transparent',
+    borderRadius: '8px',
     cursor: 'pointer',
-    fontSize: '16px',
+    fontSize: '14px',
     transition: 'all 0.15s ease',
-  },
-  actionButtonDisabled: {
-    opacity: 0.4,
-    cursor: 'not-allowed',
-  },
-  spacer: {
-    flex: 1,
-  },
-  clearButton: {
-    padding: '6px 12px',
-    backgroundColor: '#ff006e',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    transition: 'opacity 0.15s ease',
   },
 };

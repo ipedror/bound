@@ -1,19 +1,22 @@
 // ============================================================
-// MainLayout - Layout wrapper with Navbar
+// MainLayout - Excalidraw-style minimal layout
 // ============================================================
 
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useShallow } from 'zustand/shallow';
+import { Island } from '../components/Island';
 
 export default function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importData, setImportData] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const { state, setState } = useAppStore(
     useShallow((s) => ({
@@ -21,6 +24,19 @@ export default function MainLayout() {
       setState: s.setState,
     })),
   );
+
+  // Close menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    if (menuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuOpen]);
 
   const handleExport = () => {
     const data = JSON.stringify(state, null, 2);
@@ -52,7 +68,6 @@ export default function MainLayout() {
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = () => {
       setImportData(reader.result as string);
@@ -68,116 +83,169 @@ export default function MainLayout() {
 
   return (
     <div style={styles.layout}>
-      <nav style={styles.navbar}>
-        <div style={styles.navLeft}>
-          <Link to="/" style={styles.logo}>
-            Bound
-          </Link>
-          <div style={styles.navLinks}>
-            <Link
-              to="/"
-              style={{
-                ...styles.navLink,
-                ...(isActive('/') && location.pathname === '/' ? styles.navLinkActive : {}),
-              }}
-            >
-              Home
-            </Link>
-            <Link
-              to="/graph"
-              style={{
-                ...styles.navLink,
-                ...(isActive('/graph') ? styles.navLinkActive : {}),
-              }}
-            >
-              Graph
-            </Link>
-          </div>
-        </div>
-
-        <div style={styles.navRight}>
+      {/* Top-left: Hamburger menu */}
+      <div style={styles.topLeft} ref={menuRef}>
+        <Island padding={4} style={styles.menuIsland}>
           <button
-            style={styles.navButton}
-            onClick={() => setShowExportModal(true)}
-            title="Export data"
+            style={styles.menuButton}
+            onClick={() => setMenuOpen(!menuOpen)}
+            title="Menu"
+            aria-label="Open menu"
           >
-            Export
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
           </button>
-          <button
-            style={styles.navButton}
-            onClick={() => setShowImportModal(true)}
-            title="Import data"
-          >
-            Import
-          </button>
-        </div>
-      </nav>
+          <span style={styles.appTitle}>Bound</span>
+        </Island>
 
-      <main style={styles.main}>
+        {/* Dropdown menu */}
+        {menuOpen && (
+          <Island padding={4} style={styles.dropdown}>
+            <div style={styles.dropdownSection}>
+              <span style={styles.dropdownLabel}>Navigate</span>
+              <Link
+                to="/"
+                style={{
+                  ...styles.dropdownItem,
+                  ...(isActive('/') && location.pathname === '/' ? styles.dropdownItemActive : {}),
+                }}
+                onClick={() => setMenuOpen(false)}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  <polyline points="9 22 9 12 15 12 15 22" />
+                </svg>
+                Home
+              </Link>
+              <Link
+                to="/graph"
+                style={{
+                  ...styles.dropdownItem,
+                  ...(isActive('/graph') ? styles.dropdownItemActive : {}),
+                }}
+                onClick={() => setMenuOpen(false)}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="6" cy="6" r="3" />
+                  <circle cx="18" cy="18" r="3" />
+                  <circle cx="18" cy="6" r="3" />
+                  <line x1="8.5" y1="7.5" x2="15.5" y2="16.5" />
+                  <line x1="15.5" y1="7.5" x2="8.5" y2="7.5" />
+                </svg>
+                Graph
+              </Link>
+            </div>
+            <div style={styles.dropdownDivider} />
+            <div style={styles.dropdownSection}>
+              <span style={styles.dropdownLabel}>Data</span>
+              <button
+                style={styles.dropdownItem}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setShowExportModal(true);
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export
+              </button>
+              <button
+                style={styles.dropdownItem}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setShowImportModal(true);
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Import
+              </button>
+            </div>
+          </Island>
+        )}
+      </div>
+
+
+
+      {/* Main content - full viewport */}
+      <div style={styles.main}>
         <Outlet />
-      </main>
+      </div>
 
       {/* Export Modal */}
       {showExportModal && (
         <div style={styles.modalOverlay} onClick={() => setShowExportModal(false)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h2 style={styles.modalTitle}>Export Data</h2>
-            <p style={styles.modalText}>
-              Export all your areas, contents, properties, and links to a JSON file.
-            </p>
-            <div style={styles.modalActions}>
-              <button style={styles.cancelButton} onClick={() => setShowExportModal(false)}>
-                Cancel
-              </button>
-              <button style={styles.primaryButton} onClick={handleExport}>
-                Download JSON
-              </button>
+          <Island padding={24} style={styles.modal}>
+            <div onClick={(e) => e.stopPropagation()}>
+              <h2 style={styles.modalTitle}>Export Data</h2>
+              <p style={styles.modalText}>
+                Export all your areas, contents, properties, and links to a JSON file.
+              </p>
+              <div style={styles.modalActions}>
+                <button style={styles.cancelButton} onClick={() => setShowExportModal(false)}>
+                  Cancel
+                </button>
+                <button style={styles.primaryButton} onClick={handleExport}>
+                  Download JSON
+                </button>
+              </div>
             </div>
-          </div>
+          </Island>
         </div>
       )}
 
       {/* Import Modal */}
       {showImportModal && (
         <div style={styles.modalOverlay} onClick={() => setShowImportModal(false)}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h2 style={styles.modalTitle}>Import Data</h2>
-            <p style={styles.modalWarning}>
-              Warning: This will replace all existing data!
-            </p>
-            <div style={styles.importOptions}>
-              <label style={styles.fileLabel}>
-                Choose file...
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={handleFileImport}
-                  style={styles.fileInput}
+          <Island padding={24} style={styles.modal}>
+            <div onClick={(e) => e.stopPropagation()}>
+              <h2 style={styles.modalTitle}>Import Data</h2>
+              <p style={styles.modalWarning}>
+                Warning: This will replace all existing data!
+              </p>
+              <div style={styles.importOptions}>
+                <label style={styles.fileLabel}>
+                  Choose file...
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleFileImport}
+                    style={styles.fileInput}
+                  />
+                </label>
+                <span style={styles.orText}>or paste JSON:</span>
+                <textarea
+                  value={importData}
+                  onChange={(e) => setImportData(e.target.value)}
+                  placeholder="Paste JSON data here..."
+                  style={styles.textarea}
+                  rows={8}
                 />
-              </label>
-              <span style={styles.orText}>or paste JSON:</span>
-              <textarea
-                value={importData}
-                onChange={(e) => setImportData(e.target.value)}
-                placeholder="Paste JSON data here..."
-                style={styles.textarea}
-                rows={8}
-              />
+              </div>
+              {importError && <p style={styles.error}>{importError}</p>}
+              <div style={styles.modalActions}>
+                <button style={styles.cancelButton} onClick={() => setShowImportModal(false)}>
+                  Cancel
+                </button>
+                <button
+                  style={styles.dangerButton}
+                  onClick={handleImport}
+                  disabled={!importData.trim()}
+                >
+                  Import & Replace
+                </button>
+              </div>
             </div>
-            {importError && <p style={styles.error}>{importError}</p>}
-            <div style={styles.modalActions}>
-              <button style={styles.cancelButton} onClick={() => setShowImportModal(false)}>
-                Cancel
-              </button>
-              <button
-                style={styles.dangerButton}
-                onClick={handleImport}
-                disabled={!importData.trim()}
-              >
-                Import & Replace
-              </button>
-            </div>
-          </div>
+          </Island>
         </div>
       )}
     </div>
@@ -186,61 +254,94 @@ export default function MainLayout() {
 
 const styles: Record<string, React.CSSProperties> = {
   layout: {
-    minHeight: '100vh',
+    width: '100vw',
+    height: '100vh',
     backgroundColor: '#0f172a',
+    overflow: 'hidden',
+    position: 'relative',
   },
-  navbar: {
+  topLeft: {
+    position: 'fixed',
+    top: '12px',
+    left: '12px',
+    zIndex: 100,
     display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '0 24px',
-    height: '60px',
-    backgroundColor: '#1e293b',
-    borderBottom: '1px solid #334155',
-  },
-  navLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '32px',
-  },
-  logo: {
-    fontSize: '20px',
-    fontWeight: 'bold',
-    color: '#38bdf8',
-    textDecoration: 'none',
-  },
-  navLinks: {
-    display: 'flex',
+    flexDirection: 'column',
     gap: '8px',
   },
-  navLink: {
-    padding: '8px 16px',
-    color: '#94a3b8',
-    textDecoration: 'none',
-    borderRadius: '6px',
-    fontSize: '14px',
-    transition: 'all 0.2s ease',
-  },
-  navLinkActive: {
-    backgroundColor: '#334155',
-    color: '#f1f1f1',
-  },
-  navRight: {
+  menuButton: {
+    width: '36px',
+    height: '36px',
     display: 'flex',
-    gap: '8px',
-  },
-  navButton: {
-    padding: '8px 16px',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: 'transparent',
     color: '#94a3b8',
-    border: '1px solid #334155',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  dropdown: {
+    minWidth: '200px',
+    marginTop: '4px',
+  },
+  dropdownSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    padding: '4px',
+  },
+  dropdownLabel: {
+    fontSize: '10px',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    padding: '4px 8px',
+    fontWeight: 600,
+  },
+  dropdownItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '8px 10px',
+    color: '#cbd5e1',
+    backgroundColor: 'transparent',
+    border: 'none',
     borderRadius: '6px',
     fontSize: '13px',
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
+    textDecoration: 'none',
+    transition: 'background-color 0.15s',
+    width: '100%',
+    textAlign: 'left',
+  },
+  dropdownItemActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    color: '#38bdf8',
+  },
+  dropdownDivider: {
+    height: '1px',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    margin: '4px 8px',
+  },
+  menuIsland: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  appTitle: {
+    fontSize: '14px',
+    fontWeight: '700',
+    color: '#38bdf8',
+    letterSpacing: '0.5px',
+    padding: '0 6px 0 2px',
+    whiteSpace: 'nowrap',
   },
   main: {
-    minHeight: 'calc(100vh - 60px)',
+    width: '100%',
+    height: '100%',
+    overflow: 'auto',
   },
   modalOverlay: {
     position: 'fixed',
@@ -255,9 +356,6 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 1000,
   },
   modal: {
-    backgroundColor: '#1e293b',
-    borderRadius: '12px',
-    padding: '24px',
     width: '450px',
     maxWidth: '90vw',
   },

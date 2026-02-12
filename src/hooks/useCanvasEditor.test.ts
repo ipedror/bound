@@ -73,17 +73,17 @@ describe('useCanvasEditor', () => {
 
       act(() => {
         result.current.addShape(shape);
-        result.current.setSelectedShapeId(shape.id);
+        result.current.setSelectedShapeIds([shape.id]);
       });
 
-      expect(result.current.selectedShapeId).toBe(shape.id);
+      expect(result.current.selectedShapeIds).toContain(shape.id);
 
       // Change tool - should clear selection
       act(() => {
         result.current.setTool(ToolType.ELLIPSE);
       });
 
-      expect(result.current.selectedShapeId).toBeUndefined();
+      expect(result.current.selectedShapeIds).toEqual([]);
     });
   });
 
@@ -200,16 +200,16 @@ describe('useCanvasEditor', () => {
 
       act(() => {
         result.current.addShape(shape);
-        result.current.setSelectedShapeId(shape.id);
+        result.current.setSelectedShapeIds([shape.id]);
       });
 
-      expect(result.current.selectedShapeId).toBe(shape.id);
+      expect(result.current.selectedShapeIds).toContain(shape.id);
 
       act(() => {
         result.current.removeShape(shape.id);
       });
 
-      expect(result.current.selectedShapeId).toBeUndefined();
+      expect(result.current.selectedShapeIds).toEqual([]);
     });
 
     it('should update shape', () => {

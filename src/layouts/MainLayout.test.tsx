@@ -42,6 +42,11 @@ describe('MainLayout', () => {
     );
   };
 
+  /** Opens the hamburger menu */
+  const openMenu = () => {
+    fireEvent.click(screen.getByLabelText('Open menu'));
+  };
+
   describe('Rendering', () => {
     it('should render without crashing', () => {
       const { container } = renderMainLayout();
@@ -53,19 +58,22 @@ describe('MainLayout', () => {
       expect(screen.getByText('Bound')).toBeInTheDocument();
     });
 
-    it('should render navigation links', () => {
+    it('should render navigation links in hamburger menu', () => {
       renderMainLayout();
+      openMenu();
       expect(screen.getByText('Home')).toBeInTheDocument();
       expect(screen.getByText('Graph')).toBeInTheDocument();
     });
 
-    it('should render export button', () => {
+    it('should render export button in hamburger menu', () => {
       renderMainLayout();
+      openMenu();
       expect(screen.getByText('Export')).toBeInTheDocument();
     });
 
-    it('should render import button', () => {
+    it('should render import button in hamburger menu', () => {
       renderMainLayout();
+      openMenu();
       expect(screen.getByText('Import')).toBeInTheDocument();
     });
 
@@ -86,26 +94,30 @@ describe('MainLayout', () => {
   describe('Navigation', () => {
     it('should highlight Home link when on home page', () => {
       renderMainLayout('/');
+      openMenu();
       const homeLink = screen.getByText('Home').closest('a');
-      expect(homeLink).toHaveStyle({ backgroundColor: '#334155' });
+      expect(homeLink).toHaveStyle({ backgroundColor: 'rgba(56, 189, 248, 0.15)' });
     });
 
     it('should highlight Graph link when on graph page', () => {
       renderMainLayout('/graph');
+      openMenu();
       const graphLink = screen.getByText('Graph').closest('a');
-      expect(graphLink).toHaveStyle({ backgroundColor: '#334155' });
+      expect(graphLink).toHaveStyle({ backgroundColor: 'rgba(56, 189, 248, 0.15)' });
     });
   });
 
   describe('Export Modal', () => {
     it('should open export modal when clicking export button', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Export'));
       expect(screen.getByText('Export Data')).toBeInTheDocument();
     });
 
     it('should close export modal when clicking cancel', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Export'));
       fireEvent.click(screen.getByText('Cancel'));
       expect(screen.queryByText('Export Data')).not.toBeInTheDocument();
@@ -113,6 +125,7 @@ describe('MainLayout', () => {
 
     it('should close export modal when clicking overlay', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Export'));
       
       // Click on the overlay (modal background)
@@ -126,6 +139,7 @@ describe('MainLayout', () => {
 
     it('should trigger download when clicking Download JSON', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Export'));
       
       // Mock URL.createObjectURL and URL.revokeObjectURL
@@ -169,18 +183,21 @@ describe('MainLayout', () => {
   describe('Import Modal', () => {
     it('should open import modal when clicking import button', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Import'));
       expect(screen.getByText('Import Data')).toBeInTheDocument();
     });
 
     it('should show warning message', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Import'));
       expect(screen.getByText(/Warning: This will replace all existing data/)).toBeInTheDocument();
     });
 
     it('should close import modal when clicking cancel', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Import'));
       // Get the cancel button in the import modal
       const cancelButtons = screen.getAllByText('Cancel');
@@ -190,6 +207,7 @@ describe('MainLayout', () => {
 
     it('should show error for invalid JSON', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Import'));
       
       const textarea = screen.getByPlaceholderText('Paste JSON data here...');
@@ -212,6 +230,7 @@ describe('MainLayout', () => {
       };
 
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Import'));
       
       const textarea = screen.getByPlaceholderText('Paste JSON data here...');
@@ -225,6 +244,7 @@ describe('MainLayout', () => {
 
     it('should disable import button when textarea is empty', () => {
       renderMainLayout();
+      openMenu();
       fireEvent.click(screen.getByText('Import'));
       
       const importButton = screen.getByText('Import & Replace');
