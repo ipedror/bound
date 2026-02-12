@@ -11,8 +11,13 @@ import {
   GraphPage,
   NotFoundPage,
 } from '../pages';
+import LoginPage from '../pages/LoginPage';
 
 export const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: <LoginPage />,
+  },
   {
     path: '/',
     element: <MainLayout />,

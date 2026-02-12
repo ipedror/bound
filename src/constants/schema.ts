@@ -18,6 +18,6 @@ export function getDefaultState(): AppState {
     currentAreaId: undefined,
     currentContentId: undefined,
     createdAt: Date.now(),
-    updatedAt: Date.now(),
+    updatedAt: 0,
   };
 }

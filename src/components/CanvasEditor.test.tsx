@@ -2,7 +2,7 @@
 // CanvasEditor Component Tests
 // ============================================================
 
-import React, { act } from 'react';
+import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CanvasEditor } from './CanvasEditor';

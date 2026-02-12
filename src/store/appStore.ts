@@ -9,6 +9,7 @@ import type { Area } from '../types/area';
 import type { Content } from '../types/content';
 import type { Shape } from '../types/shape';
 import type { Property } from '../types/property';
+import type { Link } from '../types/link';
 import type { LinkType } from '../types/enums';
 import type { GraphFrame } from '../types/graph';
 import { getDefaultState, SCHEMA_VERSION } from '../constants/schema';
@@ -17,6 +18,7 @@ import { AreaManager } from '../managers/AreaManager';
 import { LinkManager } from '../managers/LinkManager';
 import { GraphManager } from '../managers/GraphManager';
 import { LocalStorageAdapter } from './storage';
+import { FirestoreAdapter } from './firebaseStorage';
 import { StorageManager } from './storageManager';
 import { PropertyManager } from '../managers/PropertyManager';
 
@@ -70,6 +72,7 @@ export interface AppStoreActions {
     type: LinkType,
     propertyId?: string,
   ) => string;
+  updateLink: (linkId: string, updates: Partial<Link>) => void;
   deleteLink: (linkId: string) => boolean;
 
   // Navigation
@@ -88,6 +91,10 @@ export interface AppStoreActions {
   loadFromStorage: () => Promise<void>;
   saveToStorage: () => Promise<void>;
   clearAll: () => Promise<void>;
+
+  // Cloud operations
+  loadFromFirestore: (uid: string) => Promise<void>;
+  saveToFirestore: (uid: string) => Promise<void>;
 }
 
 // Debounce save timer
@@ -542,6 +549,24 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
       return true;
     },
 
+    updateLink: (linkId: string, updates: Partial<Link>) => {
+      const { state } = get();
+      const linkIndex = state.links.findIndex((l) => l.id === linkId);
+      if (linkIndex === -1) {
+        set({ error: `Link ${linkId} not found` });
+        return;
+      }
+      const updatedLink = { ...state.links[linkIndex], ...updates };
+      const newLinks = [...state.links];
+      newLinks[linkIndex] = updatedLink;
+      const newState = {
+        ...state,
+        links: newLinks,
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
+    },
+
     // Navigation
     setCurrentAreaId: (areaId: string | undefined) => {
       const { state } = get();
@@ -648,6 +673,36 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
           lastSyncTime: null,
           error: null,
         });
+      } catch (err) {
+        set({ error: String(err) });
+      }
+    },
+
+    // Cloud operations
+    loadFromFirestore: async (uid: string) => {
+      set({ isLoading: true, error: null });
+      try {
+        const manager = new StorageManager(new FirestoreAdapter(uid));
+        const loadedState = await manager.load();
+        set({
+          state: loadedState,
+          isLoading: false,
+          lastSyncTime: Date.now(),
+        });
+      } catch (err) {
+        set({
+          error: String(err),
+          isLoading: false,
+        });
+      }
+    },
+
+    saveToFirestore: async (uid: string) => {
+      const { state } = get();
+      try {
+        const manager = new StorageManager(new FirestoreAdapter(uid));
+        await manager.save(state);
+        set({ lastSyncTime: Date.now(), error: null });
       } catch (err) {
         set({ error: String(err) });
       }

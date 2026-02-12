@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { EdgeFactory } from './edgeFactory';
 import type { Link } from '../../types/link';
-import { LinkType } from '../../types/enums';
+import { LinkType, EdgeLineStyle, EdgeArrowMode } from '../../types/enums';
 
 const createMockLink = (overrides: Partial<Link> = {}): Link => ({
   id: 'link-1',
@@ -37,6 +37,44 @@ describe('EdgeFactory', () => {
       const edge = EdgeFactory.createEdge(link);
 
       expect(edge.data.linkType).toBe(LinkType.AUTO);
+    });
+
+    it('should pass color to edge data when set', () => {
+      const link = createMockLink({ color: '#ff0000' });
+      const edge = EdgeFactory.createEdge(link);
+      expect(edge.data.color).toBe('#ff0000');
+    });
+
+    it('should pass lineStyle to edge data when set', () => {
+      const link = createMockLink({ lineStyle: EdgeLineStyle.DASHED });
+      const edge = EdgeFactory.createEdge(link);
+      expect(edge.data.lineStyle).toBe('dashed');
+    });
+
+    it('should pass arrowMode to edge data when set', () => {
+      const link = createMockLink({ arrowMode: EdgeArrowMode.BOTH });
+      const edge = EdgeFactory.createEdge(link);
+      expect(edge.data.arrowMode).toBe('both');
+    });
+
+    it('should leave style fields undefined when not set on link', () => {
+      const link = createMockLink();
+      const edge = EdgeFactory.createEdge(link);
+      expect(edge.data.color).toBeUndefined();
+      expect(edge.data.lineStyle).toBeUndefined();
+      expect(edge.data.arrowMode).toBeUndefined();
+    });
+
+    it('should pass all style fields together', () => {
+      const link = createMockLink({
+        color: '#00ff00',
+        lineStyle: EdgeLineStyle.SOLID,
+        arrowMode: EdgeArrowMode.FORWARD,
+      });
+      const edge = EdgeFactory.createEdge(link);
+      expect(edge.data.color).toBe('#00ff00');
+      expect(edge.data.lineStyle).toBe('solid');
+      expect(edge.data.arrowMode).toBe('forward');
     });
   });
 

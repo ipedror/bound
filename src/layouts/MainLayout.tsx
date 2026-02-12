@@ -7,6 +7,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useShallow } from 'zustand/shallow';
 import { Island } from '../components/Island';
+import AuthButton from '../components/AuthButton';
+import { useCloudSync, type SyncStatus } from '../hooks/useCloudSync';
 
 export default function MainLayout() {
   const location = useLocation();
@@ -17,6 +19,7 @@ export default function MainLayout() {
   const [importData, setImportData] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
 
   const { state, setState } = useAppStore(
     useShallow((s) => ({
@@ -24,6 +27,13 @@ export default function MainLayout() {
       setState: s.setState,
     })),
   );
+
+  // Cloud sync
+  const { onSyncStatusChange, forceSync, isCloudEnabled } = useCloudSync();
+
+  useEffect(() => {
+    return onSyncStatusChange((status) => setSyncStatus(status));
+  }, [onSyncStatusChange]);
 
   // Close menu on click outside
   useEffect(() => {
@@ -169,6 +179,43 @@ export default function MainLayout() {
                 </svg>
                 Import
               </button>
+            </div>
+            <div style={styles.dropdownDivider} />
+            <div style={styles.dropdownSection}>
+              <span style={styles.dropdownLabel}>Account</span>
+              <AuthButton
+                onNavigateLogin={() => {
+                  setMenuOpen(false);
+                  navigate('/login');
+                }}
+              />
+              {isCloudEnabled && (
+                <div style={styles.syncRow}>
+                  <span
+                    style={{
+                      ...styles.syncDot,
+                      backgroundColor:
+                        syncStatus === 'synced'
+                          ? '#22c55e'
+                          : syncStatus === 'syncing'
+                            ? '#38bdf8'
+                            : syncStatus === 'error'
+                              ? '#ef4444'
+                              : '#64748b',
+                    }}
+                  />
+                  <span style={styles.syncText}>
+                    {syncStatus === 'synced' && 'Cloud synced'}
+                    {syncStatus === 'syncing' && 'Syncing...'}
+                    {syncStatus === 'error' && 'Sync error'}
+                    {syncStatus === 'idle' && 'Cloud idle'}
+                    {syncStatus === 'offline' && 'Offline'}
+                  </span>
+                  <button style={styles.syncButton} onClick={forceSync} title="Force sync">
+                    ↻
+                  </button>
+                </div>
+              )}
             </div>
           </Island>
         )}
@@ -453,5 +500,32 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer',
+  },
+  syncRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 10px',
+  },
+  syncDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  syncText: {
+    fontSize: '12px',
+    color: '#94a3b8',
+    flex: 1,
+  },
+  syncButton: {
+    backgroundColor: 'transparent',
+    border: 'none',
+    color: '#94a3b8',
+    fontSize: '16px',
+    cursor: 'pointer',
+    padding: '2px 4px',
+    borderRadius: '4px',
+    lineHeight: 1,
   },
 };

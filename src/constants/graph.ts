@@ -92,14 +92,38 @@ export const CYTOSCAPE_STYLE = [
       'line-color': GRAPH_COLORS.edgeManual,
       'target-arrow-color': GRAPH_COLORS.edgeManual,
       'target-arrow-shape': 'triangle',
+      'source-arrow-shape': 'none',
       width: 2,
       opacity: 0.8,
       'curve-style': 'bezier',
     },
   },
+  // Per-edge custom color
+  {
+    selector: 'edge[color]',
+    style: {
+      'line-color': 'data(color)',
+      'target-arrow-color': 'data(color)',
+      'source-arrow-color': 'data(color)',
+    },
+  },
+  // Per-edge line style: dashed
+  {
+    selector: 'edge[lineStyle = "dashed"]',
+    style: {
+      'line-style': 'dashed',
+    },
+  },
+  // Per-edge arrow mode: both ends
+  {
+    selector: 'edge[arrowMode = "both"]',
+    style: {
+      'source-arrow-shape': 'triangle',
+    },
+  },
   // Edge auto links (dashed green)
   {
-    selector: 'edge[type = "auto"]',
+    selector: 'edge[linkType = "auto"]',
     style: {
       'line-color': GRAPH_COLORS.edgeAuto,
       'target-arrow-color': GRAPH_COLORS.edgeAuto,

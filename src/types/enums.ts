@@ -19,6 +19,18 @@ export const LinkType = {
 } as const;
 export type LinkType = (typeof LinkType)[keyof typeof LinkType];
 
+export const EdgeLineStyle = {
+  SOLID: 'solid',
+  DASHED: 'dashed',
+} as const;
+export type EdgeLineStyle = (typeof EdgeLineStyle)[keyof typeof EdgeLineStyle];
+
+export const EdgeArrowMode = {
+  FORWARD: 'forward',
+  BOTH: 'both',
+} as const;
+export type EdgeArrowMode = (typeof EdgeArrowMode)[keyof typeof EdgeArrowMode];
+
 export const ShapeType = {
   RECT: 'rect',
   ELLIPSE: 'ellipse',

@@ -8,17 +8,7 @@ export default defineConfig({
     minify: 'terser',
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'vendor-react';
-            }
-            if (id.includes('pako')) {
-              return 'vendor-pako';
-            }
-            return 'vendor';
-          }
-        },
+        manualChunks: undefined,
       },
     },
     reportCompressedSize: true,

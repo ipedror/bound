@@ -86,7 +86,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(
         {/* Top-center: Tool selector */}
         <div style={overlayStyles.topCenter}>
           <Island padding={6} style={{ display: 'flex', gap: '2px' }}>
-            {TOOL_BUTTONS.map(({ tool, label, icon, shortcut }) => (
+            {TOOL_BUTTONS.map(({ tool, label, icon }) => (
               <button
                 key={tool}
                 type="button"

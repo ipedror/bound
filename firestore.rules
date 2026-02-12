@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // User's own data - read/write only if authenticated and approved
+    match /users/{uid}/data/{docId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid
+                         && request.auth.token.approved == true;
+    }
+
+    // Pending users - only readable by admins (via Cloud Functions)
+    match /pendingUsers/{uid} {
+      allow read, write: if false; // Only Cloud Functions can access
+    }
+
+    // Approved users - only manageable by admins (via Cloud Functions / Console)
+    match /approvedUsers/{uid} {
+      allow read, write: if false; // Only Cloud Functions can access
+    }
+
+    // Default: deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

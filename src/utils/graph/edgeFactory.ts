@@ -20,6 +20,9 @@ export class EdgeFactory {
         target: link.toContentId,
         linkId: link.id,
         linkType: link.type,
+        color: link.color,
+        lineStyle: link.lineStyle,
+        arrowMode: link.arrowMode,
       },
     };
   }

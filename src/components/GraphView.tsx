@@ -14,8 +14,8 @@ import { Island } from './Island';
 import { CYTOSCAPE_STYLE, LAYOUT_OPTIONS, GRAPH_COLORS } from '../constants/graph';
 import { GraphManager } from '../managers/GraphManager';
 import type { LayoutName, GraphFrame } from '../types/graph';
-import type { CytoscapeNode, CytoscapeEdge } from '../types/graph';
-import { LinkType } from '../types/enums';
+import type { CytoscapeNode } from '../types/graph';
+import { LinkType, EdgeLineStyle, EdgeArrowMode } from '../types/enums';
 import { generateId } from '../utils/id';
 
 // Register cose-bilkent layout extension
@@ -39,6 +39,12 @@ const NODE_COLOR_PALETTE = [
   '#38bdf8', '#3b82f6', '#8b5cf6', '#a855f7',
   '#ec4899', '#ef4444', '#f97316', '#eab308',
   '#22c55e', '#14b8a6', '#06b6d4', '#6366f1',
+];
+
+const EDGE_COLOR_PALETTE = [
+  '#8338ec', '#3b82f6', '#38bdf8', '#06ffa5',
+  '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#ec4899', '#a855f7', '#14b8a6', '#94a3b8',
 ];
 
 /**
@@ -79,8 +85,15 @@ export const GraphView = memo(function GraphView({
   const [frameBgColor, setFrameBgColor] = useState('rgba(56, 189, 248, 0.08)');
   const [frameBorderColor, setFrameBorderColor] = useState('rgba(56, 189, 248, 0.4)');
 
+  // Edge editor state
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | undefined>();
+  const [showEdgeEditor, setShowEdgeEditor] = useState(false);
+  const [edgeColor, setEdgeColor] = useState(GRAPH_COLORS.edgeManual);
+  const [edgeLineStyle, setEdgeLineStyle] = useState<string>('solid');
+  const [edgeArrowMode, setEdgeArrowMode] = useState<string>('forward');
+
   const {
-    updateContent, allContents, createLink, state: appState,
+    updateContent, allContents, createLink, deleteLink, updateLink, state: appState,
     areas, addGraphFrame, updateGraphFrame, deleteGraphFrame,
     updateAreaNodePosition,
   } = useAppStore(
@@ -88,6 +101,8 @@ export const GraphView = memo(function GraphView({
       updateContent: s.updateContent,
       allContents: s.state.contents,
       createLink: s.createLink,
+      deleteLink: s.deleteLink,
+      updateLink: s.updateLink,
       state: s.state,
       areas: s.state.areas,
       addGraphFrame: s.addGraphFrame,
@@ -158,9 +173,6 @@ export const GraphView = memo(function GraphView({
   const allDisplayNodes = [...frameNodes, ...displayNodes];
   const allDisplayEdges = displayEdges;
 
-  // Area name for drill-down breadcrumb
-  const drillAreaName = drillAreaId ? areas.find((a) => a.id === drillAreaId)?.name : undefined;
-
   // Refs to avoid stale closures in Cytoscape event handlers
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
@@ -194,6 +206,12 @@ export const GraphView = memo(function GraphView({
   edgesRef.current = allDisplayEdges;
   const createLinkRef = useRef(createLink);
   createLinkRef.current = createLink;
+  const deleteLinkRef = useRef(deleteLink);
+  deleteLinkRef.current = deleteLink;
+  const updateLinkRef = useRef(updateLink);
+  updateLinkRef.current = updateLink;
+  const setSelectedEdgeIdRef = useRef(setSelectedEdgeId);
+  setSelectedEdgeIdRef.current = setSelectedEdgeId;
   const graphFramesRef = useRef(graphFrames);
   graphFramesRef.current = graphFrames;
   const updateAreaNodePositionRef = useRef(updateAreaNodePosition);
@@ -287,6 +305,7 @@ export const GraphView = memo(function GraphView({
     cy.on('click', 'edge', (evt: EventObject) => {
       const edgeId = evt.target.id();
       onEdgeClickRef.current?.(edgeId);
+      setSelectedEdgeIdRef.current(edgeId);
     });
 
     // --- Drag-to-connect: track grab start node and position ---
@@ -425,7 +444,9 @@ export const GraphView = memo(function GraphView({
     cy.on('click', (evt: EventObject) => {
       if (evt.target === cy) {
         setSelectedNodeIdRef.current(undefined);
+        setSelectedEdgeIdRef.current(undefined);
         setShowNodeEditor(false);
+        setShowEdgeEditor(false);
         onBackgroundClickRef.current?.();
         if (isConnectingRef.current) {
           cancelConnectingRef.current();
@@ -483,7 +504,7 @@ export const GraphView = memo(function GraphView({
 
     // --- Sync nodes ---
     const existingNodeIds = new Set<string>();
-    cy.nodes().forEach((n) => existingNodeIds.add(n.id()));
+    cy.nodes().forEach((n) => { existingNodeIds.add(n.id()); });
     const newNodeIds = new Set(allDisplayNodes.map((n) => n.data.id));
 
     // Remove deleted nodes
@@ -513,7 +534,7 @@ export const GraphView = memo(function GraphView({
 
     // --- Sync edges ---
     const existingEdgeIds = new Set<string>();
-    cy.edges().forEach((e) => existingEdgeIds.add(e.id()));
+    cy.edges().forEach((e) => { existingEdgeIds.add(e.id()); });
     const newEdgeIds = new Set(allDisplayEdges.map((e) => e.data.id));
 
     // Remove deleted edges
@@ -523,9 +544,12 @@ export const GraphView = memo(function GraphView({
       }
     });
 
-    // Add new edges
+    // Add or update edges
     allDisplayEdges.forEach((e) => {
-      if (!existingEdgeIds.has(e.data.id)) {
+      if (existingEdgeIds.has(e.data.id)) {
+        const cyEdge = cy.$id(e.data.id);
+        cyEdge.data(e.data);
+      } else {
         cy.add(e);
       }
     });
@@ -564,7 +588,7 @@ export const GraphView = memo(function GraphView({
       if (activeToolRef.current !== 'frame') return;
       const rect = container.getBoundingClientRect();
       const renderedPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      const modelPos = cy.renderer().projectIntoViewport(renderedPos.x, renderedPos.y);
+      const modelPos = (cy as any).renderer().projectIntoViewport(renderedPos.x, renderedPos.y);
       frameStartRef.current = { x: modelPos[0], y: modelPos[1] };
       setFramePreviewStart({ x: renderedPos.x, y: renderedPos.y });
       setFramePreviewCurrent({ x: renderedPos.x, y: renderedPos.y });
@@ -581,7 +605,7 @@ export const GraphView = memo(function GraphView({
       if (activeToolRef.current !== 'frame' || !frameStartRef.current) return;
       const rect = container.getBoundingClientRect();
       const renderedPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      const modelPos = cy.renderer().projectIntoViewport(renderedPos.x, renderedPos.y);
+      const modelPos = (cy as any).renderer().projectIntoViewport(renderedPos.x, renderedPos.y);
       const endPt = { x: modelPos[0], y: modelPos[1] };
 
       const x = Math.min(frameStartRef.current.x, endPt.x);
@@ -660,13 +684,48 @@ export const GraphView = memo(function GraphView({
       const content = allContents.find((c) => c.id === selectedNodeId);
       if (content) {
         setNodeEmoji(content.emoji ?? '');
-        setNodeColor(content.nodeColor ?? GRAPH_COLORS.nodeDefault);
+        setNodeColor((content.nodeColor ?? GRAPH_COLORS.nodeDefault) as typeof GRAPH_COLORS.nodeDefault);
         setShowNodeEditor(true);
       }
     } else {
       setShowNodeEditor(false);
     }
   }, [selectedNodeId, allContents]);
+
+  // Sync edge editor state when selectedEdgeId changes
+  useEffect(() => {
+    if (selectedEdgeId) {
+      const link = appState.links.find((l) => l.id === selectedEdgeId);
+      if (link) {
+        setEdgeColor((link.color ?? GRAPH_COLORS.edgeManual) as typeof GRAPH_COLORS.edgeManual);
+        setEdgeLineStyle(link.lineStyle ?? 'solid');
+        setEdgeArrowMode(link.arrowMode ?? 'forward');
+        setShowEdgeEditor(true);
+        // Deselect node when selecting edge
+        setSelectedNodeId(undefined);
+      }
+    } else {
+      setShowEdgeEditor(false);
+    }
+  }, [selectedEdgeId, appState.links, setSelectedNodeId]);
+
+  // Deselect edge when selecting a node
+  useEffect(() => {
+    if (selectedNodeId) {
+      setSelectedEdgeId(undefined);
+    }
+  }, [selectedNodeId]);
+
+  // Update edge selection visual
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    cy.$('edge').unselect();
+    if (selectedEdgeId) {
+      cy.$(`edge[id="${selectedEdgeId}"]`).select();
+    }
+  }, [selectedEdgeId]);
 
   // Save emoji to content
   const handleEmojiChange = useCallback((emoji: string) => {
@@ -678,11 +737,41 @@ export const GraphView = memo(function GraphView({
 
   // Save nodeColor to content
   const handleColorChange = useCallback((color: string) => {
-    setNodeColor(color);
+    setNodeColor(color as typeof GRAPH_COLORS.nodeDefault);
     if (selectedNodeId) {
       updateContent(selectedNodeId, { nodeColor: color });
     }
   }, [selectedNodeId, updateContent]);
+
+  // Edge style handlers
+  const handleEdgeColorChange = useCallback((color: string) => {
+    setEdgeColor(color as typeof GRAPH_COLORS.edgeManual);
+    if (selectedEdgeId) {
+      updateLink(selectedEdgeId, { color });
+    }
+  }, [selectedEdgeId, updateLink]);
+
+  const handleEdgeLineStyleChange = useCallback((style: string) => {
+    setEdgeLineStyle(style);
+    if (selectedEdgeId) {
+      updateLink(selectedEdgeId, { lineStyle: style as EdgeLineStyle });
+    }
+  }, [selectedEdgeId, updateLink]);
+
+  const handleEdgeArrowModeChange = useCallback((mode: string) => {
+    setEdgeArrowMode(mode);
+    if (selectedEdgeId) {
+      updateLink(selectedEdgeId, { arrowMode: mode as EdgeArrowMode });
+    }
+  }, [selectedEdgeId, updateLink]);
+
+  const handleDeleteEdge = useCallback(() => {
+    if (selectedEdgeId) {
+      deleteLink(selectedEdgeId);
+      setSelectedEdgeId(undefined);
+      setShowEdgeEditor(false);
+    }
+  }, [selectedEdgeId, deleteLink]);
 
   // Show connecting source visual
   useEffect(() => {
@@ -779,7 +868,15 @@ export const GraphView = memo(function GraphView({
           setShowFrameEditor(false);
           setEditingFrameId(undefined);
         }
+        if (showEdgeEditor) {
+          setSelectedEdgeId(undefined);
+          setShowEdgeEditor(false);
+        }
         setActiveTool('select');
+      }
+      // Delete key to remove selected edge
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedEdgeId && !showNodeEditor) {
+        handleDeleteEdge();
       }
       // Keyboard shortcuts for tools
       if (e.key === 'v' || e.key === 'V') setActiveTool('select');
@@ -789,7 +886,7 @@ export const GraphView = memo(function GraphView({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isConnecting, cancelConnecting, showFrameEditor]);
+  }, [isConnecting, cancelConnecting, showFrameEditor, showEdgeEditor, selectedEdgeId, showNodeEditor, handleDeleteEdge]);
 
   // Cursor based on tool
   const getCursor = () => {
@@ -973,6 +1070,116 @@ export const GraphView = memo(function GraphView({
               />
               <span style={overlayStyles.colorHex}>{nodeColor}</span>
             </div>
+          </Island>
+        </div>
+      )}
+
+      {/* Edge editor panel (top-left) */}
+      {showEdgeEditor && selectedEdgeId && (
+        <div style={overlayStyles.nodeEditorContainer}>
+          <Island padding={12} style={overlayStyles.nodeEditorIsland}>
+            <h4 style={overlayStyles.nodeEditorTitle}>Edge</h4>
+
+            {/* Color */}
+            <div style={overlayStyles.nodeEditorRow}>
+              <label style={overlayStyles.nodeEditorLabel}>Color</label>
+            </div>
+            <div style={overlayStyles.colorGrid}>
+              {EDGE_COLOR_PALETTE.map((c) => (
+                <button
+                  key={c}
+                  style={{
+                    ...overlayStyles.colorSwatch,
+                    backgroundColor: c,
+                    ...(edgeColor === c ? overlayStyles.colorSwatchActive : {}),
+                  }}
+                  onClick={() => handleEdgeColorChange(c)}
+                  title={c}
+                />
+              ))}
+            </div>
+            <div style={overlayStyles.nodeEditorRow}>
+              <input
+                type="color"
+                value={edgeColor}
+                onChange={(e) => handleEdgeColorChange(e.target.value)}
+                style={overlayStyles.colorInput}
+              />
+              <span style={overlayStyles.colorHex}>{edgeColor}</span>
+            </div>
+
+            {/* Line style */}
+            <div style={overlayStyles.nodeEditorRow}>
+              <label style={overlayStyles.nodeEditorLabel}>Style</label>
+            </div>
+            <div style={overlayStyles.edgeOptionRow}>
+              <button
+                style={{
+                  ...overlayStyles.edgeOptionBtn,
+                  ...(edgeLineStyle === 'solid' ? overlayStyles.edgeOptionBtnActive : {}),
+                }}
+                onClick={() => handleEdgeLineStyleChange('solid')}
+                title="Solid line"
+              >
+                <svg width="40" height="12" viewBox="0 0 40 12">
+                  <line x1="2" y1="6" x2="38" y2="6" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </button>
+              <button
+                style={{
+                  ...overlayStyles.edgeOptionBtn,
+                  ...(edgeLineStyle === 'dashed' ? overlayStyles.edgeOptionBtnActive : {}),
+                }}
+                onClick={() => handleEdgeLineStyleChange('dashed')}
+                title="Dashed line"
+              >
+                <svg width="40" height="12" viewBox="0 0 40 12">
+                  <line x1="2" y1="6" x2="38" y2="6" stroke="currentColor" strokeWidth="2" strokeDasharray="6 3" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Arrow mode */}
+            <div style={overlayStyles.nodeEditorRow}>
+              <label style={overlayStyles.nodeEditorLabel}>Arrow</label>
+            </div>
+            <div style={overlayStyles.edgeOptionRow}>
+              <button
+                style={{
+                  ...overlayStyles.edgeOptionBtn,
+                  ...(edgeArrowMode === 'forward' ? overlayStyles.edgeOptionBtnActive : {}),
+                }}
+                onClick={() => handleEdgeArrowModeChange('forward')}
+                title="One direction"
+              >
+                <svg width="40" height="14" viewBox="0 0 40 14">
+                  <line x1="4" y1="7" x2="30" y2="7" stroke="currentColor" strokeWidth="2" />
+                  <polygon points="30,3 38,7 30,11" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                style={{
+                  ...overlayStyles.edgeOptionBtn,
+                  ...(edgeArrowMode === 'both' ? overlayStyles.edgeOptionBtnActive : {}),
+                }}
+                onClick={() => handleEdgeArrowModeChange('both')}
+                title="Both directions"
+              >
+                <svg width="40" height="14" viewBox="0 0 40 14">
+                  <polygon points="10,3 2,7 10,11" fill="currentColor" />
+                  <line x1="10" y1="7" x2="30" y2="7" stroke="currentColor" strokeWidth="2" />
+                  <polygon points="30,3 38,7 30,11" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Delete */}
+            <button
+              style={overlayStyles.frameDeleteBtn}
+              onClick={handleDeleteEdge}
+            >
+              Delete Edge
+            </button>
           </Island>
         </div>
       )}
@@ -1343,5 +1550,28 @@ const overlayStyles: Record<string, React.CSSProperties> = {
     fontSize: '12px',
     fontWeight: 500,
     transition: 'all 0.15s ease',
+  },
+  edgeOptionRow: {
+    display: 'flex',
+    gap: '6px',
+    marginBottom: '10px',
+  },
+  edgeOptionBtn: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '6px 4px',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '6px',
+    color: '#94a3b8',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  edgeOptionBtnActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+    borderColor: 'rgba(56, 189, 248, 0.5)',
+    color: '#38bdf8',
   },
 };

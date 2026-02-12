@@ -57,6 +57,9 @@ export interface CytoscapeEdgeData {
   readonly target: string;
   readonly linkId: string;
   readonly linkType: LinkType;
+  readonly color?: string;
+  readonly lineStyle?: string;
+  readonly arrowMode?: string;
 }
 
 export interface CytoscapeEdge {

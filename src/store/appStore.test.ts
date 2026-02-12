@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAppStore, resetStore } from './appStore';
-import { ContentStatus, ShapeType, PropertyType, LinkType } from '../types/enums';
+import { ContentStatus, ShapeType, PropertyType, LinkType, EdgeLineStyle, EdgeArrowMode } from '../types/enums';
 import { generateId } from '../utils/id';
 import type { Shape } from '../types/shape';
 import type { Property } from '../types/property';
@@ -296,6 +296,54 @@ describe('AppStore', () => {
       useAppStore.getState().deleteContent(contentId1);
       const { state } = useAppStore.getState();
       expect(state.links).toHaveLength(0);
+    });
+
+    it('should update link color', () => {
+      const linkId = useAppStore.getState().createLink(contentId1, contentId2, LinkType.MANUAL);
+      useAppStore.getState().updateLink(linkId, { color: '#ff0000' });
+      const { state } = useAppStore.getState();
+      const link = state.links.find((l) => l.id === linkId)!;
+      expect(link.color).toBe('#ff0000');
+    });
+
+    it('should update link lineStyle', () => {
+      const linkId = useAppStore.getState().createLink(contentId1, contentId2, LinkType.MANUAL);
+      useAppStore.getState().updateLink(linkId, { lineStyle: EdgeLineStyle.DASHED });
+      const { state } = useAppStore.getState();
+      const link = state.links.find((l) => l.id === linkId)!;
+      expect(link.lineStyle).toBe('dashed');
+    });
+
+    it('should update link arrowMode', () => {
+      const linkId = useAppStore.getState().createLink(contentId1, contentId2, LinkType.MANUAL);
+      useAppStore.getState().updateLink(linkId, { arrowMode: EdgeArrowMode.BOTH });
+      const { state } = useAppStore.getState();
+      const link = state.links.find((l) => l.id === linkId)!;
+      expect(link.arrowMode).toBe('both');
+    });
+
+    it('should update multiple link fields at once', () => {
+      const linkId = useAppStore.getState().createLink(contentId1, contentId2, LinkType.MANUAL);
+      useAppStore.getState().updateLink(linkId, {
+        color: '#00ff00',
+        lineStyle: EdgeLineStyle.SOLID,
+        arrowMode: EdgeArrowMode.FORWARD,
+      });
+      const { state } = useAppStore.getState();
+      const link = state.links.find((l) => l.id === linkId)!;
+      expect(link.color).toBe('#00ff00');
+      expect(link.lineStyle).toBe('solid');
+      expect(link.arrowMode).toBe('forward');
+    });
+
+    it('should preserve existing link fields when updating', () => {
+      const linkId = useAppStore.getState().createLink(contentId1, contentId2, LinkType.MANUAL);
+      useAppStore.getState().updateLink(linkId, { color: '#ff0000' });
+      const { state } = useAppStore.getState();
+      const link = state.links.find((l) => l.id === linkId)!;
+      expect(link.fromContentId).toBe(contentId1);
+      expect(link.toContentId).toBe(contentId2);
+      expect(link.type).toBe(LinkType.MANUAL);
     });
   });
 

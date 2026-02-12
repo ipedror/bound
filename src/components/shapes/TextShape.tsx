@@ -145,7 +145,7 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
           height={shape.dimension.height + 4}
           fill="transparent"
           onClick={onSelect}
-          onTap={onSelect}
+          onTap={onSelect as unknown as (evt: Konva.KonvaEventObject<TouchEvent>) => void}
           onDblClick={handleDoubleClick}
           onDblTap={handleDoubleClick}
         />
@@ -163,7 +163,7 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
           opacity={shape.style.opacity ?? 1}
           draggable={isDraggable}
           onClick={onSelect}
-          onTap={onSelect}
+          onTap={onSelect as unknown as (evt: Konva.KonvaEventObject<TouchEvent>) => void}
           onDblClick={handleDoubleClick}
           onDblTap={handleDoubleClick}
           onDragEnd={handleDragEnd}
