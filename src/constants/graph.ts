@@ -1,0 +1,172 @@
+// ============================================================
+// Graph Constants - Cytoscape styles, layouts, defaults
+// ============================================================
+
+import type { GraphViewState, LayoutName } from '../types/graph';
+
+/**
+ * Default graph view state
+ */
+export const DEFAULT_GRAPH_STATE: GraphViewState = {
+  layout: 'cose',
+  selectedNodeId: undefined,
+  hoveredNodeId: undefined,
+  zoomLevel: 1,
+  panX: 0,
+  panY: 0,
+};
+
+/**
+ * Graph colors - dark mode palette
+ */
+export const GRAPH_COLORS = {
+  background: '#0d0d1a',
+  nodeDefault: '#38bdf8',
+  nodeSelected: '#3a86ff',
+  nodeBorder: '#00d4ff',
+  nodeBorderSelected: '#ffbe0b',
+  edgeManual: '#8338ec',
+  edgeAuto: '#06ffa5',
+  edgeSelected: '#ffbe0b',
+  text: '#f1f1f1',
+} as const;
+
+/**
+ * Cytoscape stylesheet
+ */
+export const CYTOSCAPE_STYLE = [
+  // Node base style
+  {
+    selector: 'node',
+    style: {
+      'background-color': GRAPH_COLORS.nodeDefault,
+      'border-color': GRAPH_COLORS.nodeBorder,
+      'border-width': 2,
+      'text-valign': 'bottom',
+      'text-halign': 'center',
+      'text-margin-y': 8,
+      label: 'data(label)',
+      color: GRAPH_COLORS.text,
+      'font-size': 12,
+      'font-family': 'Arial, sans-serif',
+      width: 50,
+      height: 50,
+      shape: 'ellipse',
+      'text-wrap': 'ellipsis',
+      'text-max-width': '100px',
+    },
+  },
+  // Node hover state
+  {
+    selector: 'node:active',
+    style: {
+      'overlay-opacity': 0.2,
+      'overlay-color': GRAPH_COLORS.nodeBorder,
+    },
+  },
+  // Node selected state
+  {
+    selector: 'node:selected',
+    style: {
+      'border-width': 4,
+      'border-color': GRAPH_COLORS.nodeBorderSelected,
+      'background-color': GRAPH_COLORS.nodeSelected,
+    },
+  },
+  // Edge base style (manual links)
+  {
+    selector: 'edge',
+    style: {
+      'line-color': GRAPH_COLORS.edgeManual,
+      'target-arrow-color': GRAPH_COLORS.edgeManual,
+      'target-arrow-shape': 'triangle',
+      width: 2,
+      opacity: 0.8,
+      'curve-style': 'bezier',
+    },
+  },
+  // Edge auto links (dashed green)
+  {
+    selector: 'edge[type = "auto"]',
+    style: {
+      'line-color': GRAPH_COLORS.edgeAuto,
+      'target-arrow-color': GRAPH_COLORS.edgeAuto,
+      'line-style': 'dashed',
+    },
+  },
+  // Edge selected state
+  {
+    selector: 'edge:selected',
+    style: {
+      'line-color': GRAPH_COLORS.edgeSelected,
+      'target-arrow-color': GRAPH_COLORS.edgeSelected,
+      width: 3,
+    },
+  },
+];
+
+/**
+ * Layout options for each layout type
+ * Using 'as const' for specific layouts with extended options
+ */
+export const LAYOUT_OPTIONS: Record<LayoutName, object> = {
+  cose: {
+    name: 'cose',
+    animate: true,
+    animationDuration: 500,
+    nodeRepulsion: () => 8000,
+    idealEdgeLength: () => 100,
+    gravity: 0.25,
+    numIter: 1000,
+    padding: 30,
+  },
+  'cose-bilkent': {
+    name: 'cose-bilkent',
+    animate: 'end',
+    animationDuration: 500,
+    nodeRepulsion: 8000,
+    idealEdgeLength: 100,
+    gravity: 0.25,
+    numIter: 2500,
+    padding: 30,
+  },
+  circle: {
+    name: 'circle',
+    animate: true,
+    animationDuration: 500,
+    padding: 30,
+  },
+  grid: {
+    name: 'grid',
+    animate: true,
+    animationDuration: 500,
+    padding: 30,
+    rows: undefined,
+    cols: undefined,
+  },
+  breadthfirst: {
+    name: 'breadthfirst',
+    animate: true,
+    animationDuration: 500,
+    directed: true,
+    padding: 30,
+    spacingFactor: 1.5,
+  },
+};
+
+/**
+ * Graph dimensions
+ */
+export const GRAPH_DEFAULT_WIDTH = 960;
+export const GRAPH_DEFAULT_HEIGHT = 540;
+
+/**
+ * Available layouts for UI selector
+ */
+export const AVAILABLE_LAYOUTS: { name: LayoutName; label: string }[] = [
+  { name: 'cose', label: 'Force-Directed (COSE)' },
+  { name: 'cose-bilkent', label: 'Force-Directed (CoSE-Bilkent)' },
+  { name: 'circle', label: 'Circular' },
+  { name: 'grid', label: 'Grid' },
+  { name: 'breadthfirst', label: 'Hierarchical' },
+];
