@@ -19,6 +19,8 @@ export interface Content {
   readonly emoji?: string;
   readonly nodeColor?: string;
   readonly nodePosition?: Position;
+  /** ID of the parent content (for parent-child hierarchy) */
+  readonly parentId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

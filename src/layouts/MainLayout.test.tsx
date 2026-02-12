@@ -53,9 +53,9 @@ describe('MainLayout', () => {
       expect(container).toBeTruthy();
     });
 
-    it('should render the logo', () => {
+    it('should render the menu button', () => {
       renderMainLayout();
-      expect(screen.getByText('Bound')).toBeInTheDocument();
+      expect(screen.getByLabelText('Open menu')).toBeInTheDocument();
     });
 
     it('should render navigation links in hamburger menu', () => {
@@ -86,7 +86,7 @@ describe('MainLayout', () => {
       renderMainLayout();
       
       await waitFor(() => {
-        expect(screen.getByText('Bound')).toBeInTheDocument();
+        expect(screen.getByLabelText('Open menu')).toBeInTheDocument();
       }, { timeout: 1000 });
     });
   });

@@ -14,6 +14,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '../firebase';
 import type { AuthUser, AuthProvider, ApprovalStatus, AuthState } from '../types/auth';
+import { useAppStore } from './appStore';
 
 // ---- Helpers ----
 
@@ -130,11 +131,17 @@ export const useAuthStore = create<AuthState & AuthStoreActions>()((set, _get) =
     }
   },
 
-  // Sign Out
+  // Sign Out — clears local data for security
   signOut: async () => {
     set({ isAuthLoading: true, error: null });
     try {
       await firebaseSignOut(auth);
+      // Clear all local data to protect user information
+      try {
+        await useAppStore.getState().clearAll();
+      } catch {
+        // Best-effort: don't block sign-out if clear fails
+      }
       // onAuthStateChanged will handle state update
     } catch (err) {
       set({

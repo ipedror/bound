@@ -109,6 +109,28 @@ export class ShapeFactory {
   }
 
   /**
+   * Create an image shape from a base64 data URL
+   */
+  static createImage(
+    imageSrc: string,
+    position: Position,
+    dimension: Dimension,
+    state: CanvasState,
+  ): Shape {
+    return {
+      id: generateId(),
+      type: ShapeType.IMAGE,
+      position,
+      dimension,
+      style: {
+        opacity: state.opacity,
+      },
+      imageSrc,
+      createdAt: Date.now(),
+    };
+  }
+
+  /**
    * Create a text shape
    */
   static createText(

@@ -27,7 +27,7 @@ export type { Shape, ShapeStyle } from './shape';
 export type { Content } from './content';
 export type { Link } from './link';
 export type { Area } from './area';
-export type { GraphNode, GraphEdge, Graph } from './graph';
+export type { GraphNode, GraphEdge, Graph, HierarchyLevelConfig } from './graph';
 export type { AppState } from './app';
 
 // Storage & file types

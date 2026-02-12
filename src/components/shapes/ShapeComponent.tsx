@@ -9,6 +9,7 @@ import { EllipseShape } from './EllipseShape';
 import { LineShape } from './LineShape';
 import { ArrowShape } from './ArrowShape';
 import { TextShape } from './TextShape';
+import { ImageShape } from './ImageShape';
 import { ShapeType } from '../../types/enums';
 import type { Shape } from '../../types/shape';
 import type { Position } from '../../types/base';
@@ -19,12 +20,13 @@ interface ShapeComponentProps {
   isDraggable: boolean;
   onSelect: (e?: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<Shape>) => void;
+  onDragStart?: () => void;
   onDragEnd: (position: Position) => void;
   onDoubleClick?: (shapeId: string) => void;
 }
 
 export const ShapeComponent: React.FC<ShapeComponentProps> = React.memo(
-  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragEnd, onDoubleClick }) => {
+  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragStart, onDragEnd, onDoubleClick }) => {
     const handleUpdate = useCallback(
       (updates: Partial<Shape>) => {
         onUpdate(updates);
@@ -48,6 +50,7 @@ export const ShapeComponent: React.FC<ShapeComponentProps> = React.memo(
             isDraggable={isDraggable}
             onSelect={onSelect}
             onUpdate={handleUpdate}
+            onDragStart={onDragStart}
             onDragEnd={handleDragEnd}
           />
         );
@@ -60,6 +63,7 @@ export const ShapeComponent: React.FC<ShapeComponentProps> = React.memo(
             isDraggable={isDraggable}
             onSelect={onSelect}
             onUpdate={handleUpdate}
+            onDragStart={onDragStart}
             onDragEnd={handleDragEnd}
           />
         );
@@ -72,6 +76,7 @@ export const ShapeComponent: React.FC<ShapeComponentProps> = React.memo(
             isDraggable={isDraggable}
             onSelect={onSelect}
             onUpdate={handleUpdate}
+            onDragStart={onDragStart}
             onDragEnd={handleDragEnd}
           />
         );
@@ -84,6 +89,7 @@ export const ShapeComponent: React.FC<ShapeComponentProps> = React.memo(
             isDraggable={isDraggable}
             onSelect={onSelect}
             onUpdate={handleUpdate}
+            onDragStart={onDragStart}
             onDragEnd={handleDragEnd}
           />
         );
@@ -96,8 +102,22 @@ export const ShapeComponent: React.FC<ShapeComponentProps> = React.memo(
             isDraggable={isDraggable}
             onSelect={onSelect}
             onUpdate={handleUpdate}
+            onDragStart={onDragStart}
             onDragEnd={handleDragEnd}
             onDoubleClick={onDoubleClick}
+          />
+        );
+
+      case ShapeType.IMAGE:
+        return (
+          <ImageShape
+            shape={shape}
+            isSelected={isSelected}
+            isDraggable={isDraggable}
+            onSelect={onSelect}
+            onUpdate={handleUpdate}
+            onDragStart={onDragStart}
+            onDragEnd={handleDragEnd}
           />
         );
 

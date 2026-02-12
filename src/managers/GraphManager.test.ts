@@ -8,8 +8,10 @@ import { AreaManager } from './AreaManager';
 import { ContentManager } from './ContentManager';
 import { LinkManager } from './LinkManager';
 import { getDefaultState } from '../constants/schema';
+import { DEFAULT_HIERARCHY_LEVEL_CONFIGS } from '../constants/graph';
 import { ContentStatus, LinkType } from '../types/enums';
 import type { AppState } from '../types/app';
+import type { HierarchyLevelConfig } from '../types/graph';
 
 describe('GraphManager', () => {
   let state: AppState;
@@ -603,6 +605,331 @@ describe('GraphManager', () => {
       const edges = GraphManager.getEdgesByAreaId(state, areaId);
 
       expect(edges).toHaveLength(0);
+    });
+  });
+
+  describe('computeDepthMap', () => {
+    it('should assign depth 0 to root contents (no parentId)', () => {
+      const depthMap = GraphManager.computeDepthMap(state.contents);
+      expect(depthMap.get(contentId1)).toBe(0);
+      expect(depthMap.get(contentId2)).toBe(0);
+      expect(depthMap.get(contentId3)).toBe(0);
+    });
+
+    it('should assign depth 1 to direct children', () => {
+      // Set content2 as child of content1
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const depthMap = GraphManager.computeDepthMap(state.contents);
+      expect(depthMap.get(contentId1)).toBe(0);
+      expect(depthMap.get(contentId2)).toBe(1);
+    });
+
+    it('should assign increasing depths for nested children', () => {
+      // content1 → content2 → content3
+      state = {
+        ...state,
+        contents: state.contents.map((c) => {
+          if (c.id === contentId2) return { ...c, parentId: contentId1 };
+          if (c.id === contentId3) return { ...c, parentId: contentId2 };
+          return c;
+        }),
+      };
+      const depthMap = GraphManager.computeDepthMap(state.contents);
+      expect(depthMap.get(contentId1)).toBe(0);
+      expect(depthMap.get(contentId2)).toBe(1);
+      expect(depthMap.get(contentId3)).toBe(2);
+    });
+
+    it('should handle cycles without infinite loop', () => {
+      // Create a cycle: content1 → content2 → content1
+      state = {
+        ...state,
+        contents: state.contents.map((c) => {
+          if (c.id === contentId1) return { ...c, parentId: contentId2 };
+          if (c.id === contentId2) return { ...c, parentId: contentId1 };
+          return c;
+        }),
+      };
+      // Should not hang
+      const depthMap = GraphManager.computeDepthMap(state.contents);
+      expect(depthMap.size).toBe(3);
+    });
+
+    it('should cap depth at MAX_HIERARCHY_DEPTH - 1', () => {
+      // Create a chain of 10 contents — depth should cap at 7
+      let prevId: string | undefined;
+      for (let i = 0; i < 10; i++) {
+        const c = ContentManager.createContent(areaId, `Deep ${i}`, state);
+        const closed = { ...c, status: ContentStatus.CLOSED, parentId: prevId };
+        state = { ...state, contents: [...state.contents, closed] };
+        prevId = c.id;
+      }
+      const depthMap = GraphManager.computeDepthMap(state.contents);
+      // The deepest node should be capped
+      const maxDepth = Math.max(...depthMap.values());
+      expect(maxDepth).toBe(7); // MAX_HIERARCHY_DEPTH - 1
+    });
+  });
+
+  describe('buildHierarchyGraph', () => {
+    it('should include parent-child edges', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const graph = GraphManager.buildHierarchyGraph(state);
+      // Should have a parent-child edge from content2 → content1
+      const parentEdge = graph.edges.find(
+        (e) => e.data.linkType === LinkType.PARENT && e.data.source === contentId2,
+      );
+      expect(parentEdge).toBeDefined();
+      expect(parentEdge!.data.target).toBe(contentId1);
+    });
+
+    it('should filter by maxLevels', () => {
+      // content1 → content2 → content3
+      state = {
+        ...state,
+        contents: state.contents.map((c) => {
+          if (c.id === contentId2) return { ...c, parentId: contentId1 };
+          if (c.id === contentId3) return { ...c, parentId: contentId2 };
+          return c;
+        }),
+      };
+      // maxLevels=2 should include depth 0 and 1, exclude depth 2 (content3)
+      const graph = GraphManager.buildHierarchyGraph(state, undefined, 2);
+      const nodeIds = graph.nodes.map((n) => n.data.id);
+      expect(nodeIds).toContain(contentId1);
+      expect(nodeIds).toContain(contentId2);
+      expect(nodeIds).not.toContain(contentId3);
+    });
+
+    it('should apply level config colors to nodes', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const configs: HierarchyLevelConfig[] = [
+        { depth: 0, name: 'Root', color: '#ff0000', areaScope: 'all', areaIds: [] },
+        { depth: 1, name: 'Child', color: '#00ff00', areaScope: 'all', areaIds: [] },
+      ];
+      const graph = GraphManager.buildHierarchyGraph(state, undefined, 8, configs);
+      const node1 = graph.nodes.find((n) => n.data.id === contentId1);
+      const node2 = graph.nodes.find((n) => n.data.id === contentId2);
+      expect(node1?.data.color).toBe('#ff0000');
+      expect(node2?.data.color).toBe('#00ff00');
+    });
+
+    it('should apply level names to nodes', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const configs: HierarchyLevelConfig[] = [
+        { depth: 0, name: 'Chapter', color: '#ff0000', areaScope: 'all', areaIds: [] },
+        { depth: 1, name: 'Section', color: '#00ff00', areaScope: 'all', areaIds: [] },
+      ];
+      const graph = GraphManager.buildHierarchyGraph(state, undefined, 8, configs);
+      const node1 = graph.nodes.find((n) => n.data.id === contentId1);
+      const node2 = graph.nodes.find((n) => n.data.id === contentId2);
+      expect(node1?.data.levelName).toBe('Chapter');
+      expect(node2?.data.levelName).toBe('Section');
+    });
+
+    it('should not apply level color when area scope restricts', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const configs: HierarchyLevelConfig[] = [
+        { depth: 0, name: 'Root', color: '#ff0000', areaScope: 'specific', areaIds: ['non-existent-area'] },
+        { depth: 1, name: 'Child', color: '#00ff00', areaScope: 'all', areaIds: [] },
+      ];
+      const graph = GraphManager.buildHierarchyGraph(state, undefined, 8, configs);
+      const node1 = graph.nodes.find((n) => n.data.id === contentId1);
+      // Should NOT use the level config color (area doesn't match)
+      expect(node1?.data.color).not.toBe('#ff0000');
+      // The child should still get its color since it's 'all' scope
+      const node2 = graph.nodes.find((n) => n.data.id === contentId2);
+      expect(node2?.data.color).toBe('#00ff00');
+    });
+
+    it('should apply level color when area scope matches', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const configs: HierarchyLevelConfig[] = [
+        { depth: 0, name: 'Root', color: '#ff0000', areaScope: 'specific', areaIds: [areaId] },
+      ];
+      const graph = GraphManager.buildHierarchyGraph(state, undefined, 8, configs);
+      const node1 = graph.nodes.find((n) => n.data.id === contentId1);
+      expect(node1?.data.color).toBe('#ff0000');
+    });
+
+    it('should filter by area', () => {
+      const area2 = AreaManager.createArea('Area 2', state);
+      state = { ...state, areas: [...state.areas, area2] };
+
+      const otherContent = ContentManager.createContent(area2.id, 'Other', state);
+      const closedOther = { ...otherContent, status: ContentStatus.CLOSED };
+      state = { ...state, contents: [...state.contents, closedOther] };
+
+      const graph = GraphManager.buildHierarchyGraph(state, areaId);
+      const nodeIds = graph.nodes.map((n) => n.data.id);
+      expect(nodeIds).not.toContain(closedOther.id);
+      expect(nodeIds).toContain(contentId1);
+    });
+  });
+
+  describe('buildChildrenGraph', () => {
+    it('should include parent as root node at depth 0', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const graph = GraphManager.buildChildrenGraph(state, contentId1);
+      const parentNode = graph.nodes.find((n) => n.data.id === contentId1);
+      expect(parentNode).toBeDefined();
+      expect(parentNode?.data.hierarchyDepth).toBe(0);
+    });
+
+    it('should include direct children', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const graph = GraphManager.buildChildrenGraph(state, contentId1);
+      const nodeIds = graph.nodes.map((n) => n.data.id);
+      expect(nodeIds).toContain(contentId2);
+    });
+
+    it('should respect maxLevels parameter', () => {
+      // content1 → content2 → content3
+      state = {
+        ...state,
+        contents: state.contents.map((c) => {
+          if (c.id === contentId2) return { ...c, parentId: contentId1 };
+          if (c.id === contentId3) return { ...c, parentId: contentId2 };
+          return c;
+        }),
+      };
+      // maxLevels=1 should include only 1 level of children (content2) + parent
+      const graph = GraphManager.buildChildrenGraph(state, contentId1, 1);
+      const nodeIds = graph.nodes.map((n) => n.data.id);
+      expect(nodeIds).toContain(contentId1);
+      expect(nodeIds).toContain(contentId2);
+      expect(nodeIds).not.toContain(contentId3);
+    });
+
+    it('should include parent-child edges', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const graph = GraphManager.buildChildrenGraph(state, contentId1);
+      const parentEdge = graph.edges.find((e) => e.data.linkType === LinkType.PARENT);
+      expect(parentEdge).toBeDefined();
+      expect(parentEdge!.data.source).toBe(contentId2);
+      expect(parentEdge!.data.target).toBe(contentId1);
+    });
+
+    it('should apply level configs to children graph', () => {
+      state = {
+        ...state,
+        contents: state.contents.map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        ),
+      };
+      const configs: HierarchyLevelConfig[] = [
+        { depth: 0, name: 'Parent', color: '#aaaaaa', areaScope: 'all', areaIds: [] },
+        { depth: 1, name: 'Child', color: '#bbbbbb', areaScope: 'all', areaIds: [] },
+      ];
+      const graph = GraphManager.buildChildrenGraph(state, contentId1, 8, configs);
+      const parentNode = graph.nodes.find((n) => n.data.id === contentId1);
+      const childNode = graph.nodes.find((n) => n.data.id === contentId2);
+      expect(parentNode?.data.color).toBe('#aaaaaa');
+      expect(childNode?.data.color).toBe('#bbbbbb');
+    });
+
+    it('should return empty graph for non-existent parent', () => {
+      const graph = GraphManager.buildChildrenGraph(state, 'nonexistent');
+      expect(graph.nodes).toHaveLength(0);
+      expect(graph.edges).toHaveLength(0);
+    });
+  });
+
+  describe('buildParentChildEdges', () => {
+    it('should create edges for contents with parentId', () => {
+      const contents = state.contents.map((c) =>
+        c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+      );
+      const edges = GraphManager.buildParentChildEdges(contents);
+      expect(edges).toHaveLength(1);
+      expect(edges[0].data.linkType).toBe(LinkType.PARENT);
+      expect(edges[0].data.source).toBe(contentId2);
+      expect(edges[0].data.target).toBe(contentId1);
+    });
+
+    it('should exclude edges where parent is not in contents set', () => {
+      // content2 has parentId pointing to something outside the set
+      const contents = state.contents
+        .filter((c) => c.id !== contentId1)
+        .map((c) =>
+          c.id === contentId2 ? { ...c, parentId: contentId1 } : c,
+        );
+      const edges = GraphManager.buildParentChildEdges(contents);
+      expect(edges).toHaveLength(0);
+    });
+
+    it('should return empty for contents without parents', () => {
+      const edges = GraphManager.buildParentChildEdges(state.contents);
+      expect(edges).toHaveLength(0);
+    });
+  });
+
+  describe('DEFAULT_HIERARCHY_LEVEL_CONFIGS', () => {
+    it('should have 8 configs', () => {
+      expect(DEFAULT_HIERARCHY_LEVEL_CONFIGS).toHaveLength(8);
+    });
+
+    it('should have sequential depths 0-7', () => {
+      DEFAULT_HIERARCHY_LEVEL_CONFIGS.forEach((c, i) => {
+        expect(c.depth).toBe(i);
+      });
+    });
+
+    it('should default to areaScope "all"', () => {
+      DEFAULT_HIERARCHY_LEVEL_CONFIGS.forEach((c) => {
+        expect(c.areaScope).toBe('all');
+        expect(c.areaIds).toEqual([]);
+      });
+    });
+
+    it('should have unique colors', () => {
+      const colors = DEFAULT_HIERARCHY_LEVEL_CONFIGS.map((c) => c.color);
+      expect(new Set(colors).size).toBe(8);
     });
   });
 });

@@ -76,6 +76,32 @@ describe('Type Guards', () => {
       expect(isShape(null)).toBe(false);
       expect(isShape('string')).toBe(false);
     });
+
+    it('should validate IMAGE shape type', () => {
+      const imageShape: Shape = {
+        id: 's2',
+        type: ShapeType.IMAGE,
+        position: { x: 10, y: 20 },
+        dimension: { width: 200, height: 150 },
+        style: { opacity: 1 },
+        imageSrc: 'data:image/png;base64,abc123',
+        createdAt: Date.now(),
+      };
+      expect(isShape(imageShape)).toBe(true);
+    });
+
+    it('should validate shape with groupId', () => {
+      const groupedShape: Shape = {
+        id: 's3',
+        type: ShapeType.RECT,
+        position: { x: 0, y: 0 },
+        dimension: { width: 100, height: 50 },
+        style: { fill: '#fff' },
+        groupId: 'group-123',
+        createdAt: Date.now(),
+      };
+      expect(isShape(groupedShape)).toBe(true);
+    });
   });
 
   // ---- Content ----

@@ -1,15 +1,15 @@
 // ============================================================
-// RectShape - Rectangle shape component
+// ImageShape - Image shape component for pasted images
 // ============================================================
 
-import React, { useRef, useCallback } from 'react';
-import { Rect, Transformer, Group } from 'react-konva';
+import React, { useRef, useCallback, useEffect, useState } from 'react';
+import { Image as KonvaImage, Transformer, Group } from 'react-konva';
 import type Konva from 'konva';
 import type { Shape } from '../../types/shape';
 import type { Position, Dimension } from '../../types/base';
 import { SELECTION_COLOR, MIN_SHAPE_SIZE } from '../../constants/canvas';
 
-interface RectShapeProps {
+interface ImageShapeProps {
   shape: Shape;
   isSelected: boolean;
   isDraggable: boolean;
@@ -19,15 +19,26 @@ interface RectShapeProps {
   onDragEnd: (position: Position) => void;
 }
 
-export const RectShape: React.FC<RectShapeProps> = React.memo(
+export const ImageShape: React.FC<ImageShapeProps> = React.memo(
   ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragStart, onDragEnd }) => {
-    const shapeRef = useRef<Konva.Rect>(null);
+    const imageRef = useRef<Konva.Image>(null);
     const transformerRef = useRef<Konva.Transformer>(null);
+    const [image, setImage] = useState<HTMLImageElement | null>(null);
+
+    // Load image from data URL
+    useEffect(() => {
+      if (!shape.imageSrc) return;
+      const img = new window.Image();
+      img.onload = () => {
+        setImage(img);
+      };
+      img.src = shape.imageSrc;
+    }, [shape.imageSrc]);
 
     // Attach transformer when selected
-    React.useEffect(() => {
-      if (isSelected && shapeRef.current && transformerRef.current) {
-        transformerRef.current.nodes([shapeRef.current]);
+    useEffect(() => {
+      if (isSelected && imageRef.current && transformerRef.current) {
+        transformerRef.current.nodes([imageRef.current]);
         transformerRef.current.getLayer()?.batchDraw();
       }
     }, [isSelected]);
@@ -44,7 +55,7 @@ export const RectShape: React.FC<RectShapeProps> = React.memo(
     );
 
     const handleTransformEnd = useCallback(() => {
-      const node = shapeRef.current;
+      const node = imageRef.current;
       if (!node) return;
 
       const scaleX = node.scaleX();
@@ -65,19 +76,21 @@ export const RectShape: React.FC<RectShapeProps> = React.memo(
       });
     }, [onUpdate]);
 
+    if (!image) return null;
+
     return (
       <Group>
-        <Rect
-          ref={shapeRef}
+        <KonvaImage
+          ref={imageRef}
           id={shape.id}
+          image={image}
           x={shape.position.x}
           y={shape.position.y}
           width={shape.dimension.width}
           height={shape.dimension.height}
-          fill={shape.style.fill}
-          stroke={isSelected ? SELECTION_COLOR : shape.style.stroke}
-          strokeWidth={shape.style.strokeWidth ?? 2}
           opacity={shape.style.opacity ?? 1}
+          stroke={isSelected ? SELECTION_COLOR : undefined}
+          strokeWidth={isSelected ? 2 : 0}
           draggable={isDraggable}
           onClick={onSelect}
           onTap={onSelect}
@@ -88,8 +101,8 @@ export const RectShape: React.FC<RectShapeProps> = React.memo(
         {isSelected && (
           <Transformer
             ref={transformerRef}
+            keepRatio={true}
             boundBoxFunc={(oldBox, newBox) => {
-              // Limit resize
               if (newBox.width < MIN_SHAPE_SIZE || newBox.height < MIN_SHAPE_SIZE) {
                 return oldBox;
               }
@@ -102,4 +115,4 @@ export const RectShape: React.FC<RectShapeProps> = React.memo(
   },
 );
 
-RectShape.displayName = 'RectShape';
+ImageShape.displayName = 'ImageShape';

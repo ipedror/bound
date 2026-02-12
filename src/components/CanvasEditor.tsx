@@ -53,6 +53,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     redo,
     canUndo,
     canRedo,
+    groupSelectedShapes,
+    ungroupSelectedShapes,
+    selectGroup,
     commitToStore,
   } = useCanvasEditor(contentId);
 
@@ -71,6 +74,12 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   // Selection rectangle (rubber-band) state
   const [selectionStart, setSelectionStart] = useState<Position | null>(null);
   const [selectionCurrent, setSelectionCurrent] = useState<Position | null>(null);
+  // Multi-drag: track dragged shape and all selected shapes' start positions
+  const dragInfoRef = useRef<{
+    shapeId: string;
+    modelPositions: Map<string, Position>;   // model positions (top-left) at drag start
+    nodePositions: Map<string, Position>;    // konva node positions at drag start
+  } | null>(null);
 
   // Resize stage to fill container
   useEffect(() => {
@@ -116,6 +125,16 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         e.preventDefault();
         redo();
       }
+      // Group: Ctrl+G
+      if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !e.shiftKey) {
+        e.preventDefault();
+        groupSelectedShapes();
+      }
+      // Ungroup: Ctrl+Shift+G
+      if ((e.ctrlKey || e.metaKey) && e.key === 'G' && e.shiftKey) {
+        e.preventDefault();
+        ungroupSelectedShapes();
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedShapeIds.length > 0 && document.activeElement === document.body) {
           e.preventDefault();
@@ -135,7 +154,112 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, selectedShapeIds, removeShape, setSelectedShapeIds]);
+  }, [undo, redo, selectedShapeIds, removeShape, setSelectedShapeIds, groupSelectedShapes, ungroupSelectedShapes]);
+
+  // Handle paste: images from clipboard
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const img = new window.Image();
+            img.onload = () => {
+              // Scale image to fit reasonably on canvas (max 600px)
+              const maxDim = 600;
+              let w = img.width;
+              let h = img.height;
+              if (w > maxDim || h > maxDim) {
+                const ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
+              }
+              // Place at center of current view
+              const centerX = (-stagePos.x + stageSize.width / 2) / scale - w / 2;
+              const centerY = (-stagePos.y + stageSize.height / 2) / scale - h / 2;
+              const shape = ShapeFactory.createImage(
+                dataUrl,
+                { x: centerX, y: centerY },
+                { width: w, height: h },
+                canvasState,
+              );
+              addShape(shape);
+            };
+            img.src = dataUrl;
+          };
+          reader.readAsDataURL(file);
+          break; // Only handle first image
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [addShape, canvasState, scale, stagePos, stageSize]);
+
+  // Export canvas as image
+  const exportCanvas = useCallback(
+    (format: 'png' | 'jpeg' = 'png') => {
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      // If shapes are selected, export only the bounding box of selected shapes
+      let exportShapes =
+        selectedShapeIds.length > 0
+          ? shapes.filter((s) => selectedShapeIds.includes(s.id))
+          : shapes;
+
+      // Expand to include all group members when selection contains grouped shapes
+      if (selectedShapeIds.length > 0) {
+        const groupIds = new Set(
+          exportShapes.filter((s) => s.groupId).map((s) => s.groupId!),
+        );
+        if (groupIds.size > 0) {
+          exportShapes = shapes.filter(
+            (s) => selectedShapeIds.includes(s.id) || (s.groupId && groupIds.has(s.groupId)),
+          );
+        }
+      }
+
+      if (exportShapes.length === 0) return;
+
+      // Calculate bounding box of shapes to export
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const s of exportShapes) {
+        minX = Math.min(minX, s.position.x);
+        minY = Math.min(minY, s.position.y);
+        maxX = Math.max(maxX, s.position.x + s.dimension.width);
+        maxY = Math.max(maxY, s.position.y + s.dimension.height);
+      }
+
+      const padding = 20;
+      const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+      const quality = format === 'jpeg' ? 0.95 : 1;
+
+      const dataUrl = stage.toDataURL({
+        x: minX - padding,
+        y: minY - padding,
+        width: maxX - minX + padding * 2,
+        height: maxY - minY + padding * 2,
+        pixelRatio: 3, // High quality export (3x resolution)
+        mimeType,
+        quality,
+      });
+
+      const link = document.createElement('a');
+      link.download = `canvas-export.${format}`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+    [shapes, selectedShapeIds],
+  );
 
   // Ctrl + Scroll zoom
   useEffect(() => {
@@ -206,27 +330,8 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           // Start rubber-band area selection
           setSelectionStart(pos);
           setSelectionCurrent(pos);
-        } else {
-          // Find the shape that was clicked by walking up the Konva tree
-          let node: Konva.Node | null = e.target;
-          let targetId: string | undefined;
-          while (node && node !== e.target.getStage()) {
-            const nodeId = node.id?.();
-            if (nodeId && shapes.some((s) => s.id === nodeId)) {
-              targetId = nodeId;
-              break;
-            }
-            node = node.parent;
-          }
-          if (targetId) {
-            const nativeEvent = e.evt;
-            if (nativeEvent?.shiftKey) {
-              toggleShapeSelection(targetId);
-            } else {
-              setSelectedShapeIds([targetId]);
-            }
-          }
         }
+        // Shape click selection is handled by handleShapeSelect via onClick on shapes
         return;
       }
 
@@ -256,7 +361,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         }
       }
     },
-    [canvasState.tool, getPointerPosition, setSelectedShapeIds, toggleShapeSelection, shapes, removeShape, textInputVisible],
+    [canvasState.tool, getPointerPosition, setSelectedShapeIds, shapes, removeShape, textInputVisible],
   );
 
   const handleMouseMove = useCallback(() => {
@@ -395,14 +500,33 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     (shapeId: string, e?: React.MouseEvent | Konva.KonvaEventObject<MouseEvent>) => {
       if (canvasState.tool === ToolType.SELECT) {
         const nativeEvent = e && 'evt' in e ? e.evt : e;
+        const shape = shapes.find((s) => s.id === shapeId);
+
         if (nativeEvent && (nativeEvent as MouseEvent).shiftKey) {
-          toggleShapeSelection(shapeId);
+          // Shift+click: toggle individual shape (or all group members)
+          if (shape?.groupId) {
+            const groupIds = shapes.filter((s) => s.groupId === shape.groupId).map((s) => s.id);
+            setSelectedShapeIds((prev) => {
+              const allSelected = groupIds.every((id) => prev.includes(id));
+              if (allSelected) {
+                return prev.filter((id) => !groupIds.includes(id));
+              }
+              return Array.from(new Set([...prev, ...groupIds]));
+            });
+          } else {
+            toggleShapeSelection(shapeId);
+          }
         } else {
-          setSelectedShapeIds([shapeId]);
+          // Normal click: select shape (or entire group)
+          if (shape?.groupId) {
+            selectGroup(shape.groupId);
+          } else {
+            setSelectedShapeIds([shapeId]);
+          }
         }
       }
     },
-    [canvasState.tool, setSelectedShapeIds, toggleShapeSelection],
+    [canvasState.tool, setSelectedShapeIds, toggleShapeSelection, shapes, selectGroup],
   );
 
   const handleShapeUpdate = useCallback(
@@ -412,9 +536,100 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     [updateShape],
   );
 
+  const handleShapeDragStart = useCallback(
+    (shapeId: string) => {
+      let ids = selectedShapeIds.includes(shapeId) ? [...selectedShapeIds] : [shapeId];
+
+      // Include all group members for any grouped shape in the set
+      const groupIdsToInclude = new Set<string>();
+      for (const id of ids) {
+        const s = shapes.find((sh) => sh.id === id);
+        if (s?.groupId) groupIdsToInclude.add(s.groupId);
+      }
+      if (groupIdsToInclude.size > 0) {
+        const allGroupMembers = shapes
+          .filter((s) => s.groupId && groupIdsToInclude.has(s.groupId))
+          .map((s) => s.id);
+        ids = Array.from(new Set([...ids, ...allGroupMembers]));
+      }
+
+      const modelPositions = new Map<string, Position>();
+      const nodePositions = new Map<string, Position>();
+      const stage = stageRef.current;
+
+      for (const id of ids) {
+        const s = shapes.find((sh) => sh.id === id);
+        if (s) modelPositions.set(id, { ...s.position });
+        if (stage) {
+          const node = stage.findOne(`#${id}`);
+          if (node) nodePositions.set(id, { x: node.x(), y: node.y() });
+        }
+      }
+
+      dragInfoRef.current = { shapeId, modelPositions, nodePositions };
+
+      if (!selectedShapeIds.includes(shapeId)) {
+        // Select all dragged shapes (including group members)
+        setSelectedShapeIds(ids);
+      }
+    },
+    [shapes, selectedShapeIds, setSelectedShapeIds],
+  );
+
+  // Real-time companion movement during drag
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || typeof stage.on !== 'function') return;
+
+    const handleDragMove = () => {
+      const info = dragInfoRef.current;
+      if (!info || info.modelPositions.size <= 1) return;
+
+      const draggedNode = stage.findOne(`#${info.shapeId}`);
+      if (!draggedNode) return;
+
+      const startNodePos = info.nodePositions.get(info.shapeId);
+      if (!startNodePos) return;
+
+      const dx = draggedNode.x() - startNodePos.x;
+      const dy = draggedNode.y() - startNodePos.y;
+
+      for (const [id, startPos] of info.nodePositions) {
+        if (id === info.shapeId) continue;
+        const node = stage.findOne(`#${id}`);
+        if (node) {
+          node.x(startPos.x + dx);
+          node.y(startPos.y + dy);
+        }
+      }
+    };
+
+    stage.on('dragmove', handleDragMove);
+    return () => { stage.off('dragmove', handleDragMove); };
+  });
+
   const handleShapeDragEnd = useCallback(
     (shapeId: string, position: Position) => {
+      const info = dragInfoRef.current;
       updateShapePosition(shapeId, position);
+
+      // Move all other selected shapes by the same delta
+      if (info && info.shapeId === shapeId && info.modelPositions.size > 1) {
+        const startPos = info.modelPositions.get(shapeId);
+        if (startPos) {
+          const dx = position.x - startPos.x;
+          const dy = position.y - startPos.y;
+          for (const [id, origPos] of info.modelPositions) {
+            if (id === shapeId) continue;
+            updateShapePosition(id, {
+              x: origPos.x + dx,
+              y: origPos.y + dy,
+            });
+          }
+        }
+      }
+
+      dragInfoRef.current = null;
       commitToStore();
     },
     [updateShapePosition, commitToStore],
@@ -488,6 +703,43 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       default:
         return null;
     }
+  };
+
+  // Render group bounding boxes (dashed outline for grouped shapes)
+  const renderGroupOutlines = () => {
+    const groupIds = new Set(
+      shapes.filter((s) => s.groupId).map((s) => s.groupId!),
+    );
+    return Array.from(groupIds).map((gid) => {
+      const groupShapes = shapes.filter((s) => s.groupId === gid);
+      if (groupShapes.length < 2) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const s of groupShapes) {
+        minX = Math.min(minX, s.position.x);
+        minY = Math.min(minY, s.position.y);
+        maxX = Math.max(maxX, s.position.x + s.dimension.width);
+        maxY = Math.max(maxY, s.position.y + s.dimension.height);
+      }
+      const pad = 6;
+      const isGroupSelected = groupShapes.some((s) =>
+        selectedShapeIds.includes(s.id),
+      );
+      return (
+        <Rect
+          key={`group-${gid}`}
+          x={minX - pad}
+          y={minY - pad}
+          width={maxX - minX + pad * 2}
+          height={maxY - minY + pad * 2}
+          fill="transparent"
+          stroke={isGroupSelected ? '#38bdf8' : 'rgba(148,163,184,0.4)'}
+          strokeWidth={1}
+          dash={[6, 4]}
+          cornerRadius={4}
+          listening={false}
+        />
+      );
+    });
   };
 
   // Render rubber-band selection rectangle
@@ -567,9 +819,11 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 isDraggable={canvasState.tool === ToolType.SELECT}
                 onSelect={(e) => handleShapeSelect(shape.id, e)}
                 onUpdate={(updates) => handleShapeUpdate(shape.id, updates)}
+                onDragStart={() => handleShapeDragStart(shape.id)}
                 onDragEnd={(pos) => handleShapeDragEnd(shape.id, pos)}
               />
             ))}
+            {renderGroupOutlines()}
             {renderPreview()}
             {renderSelectionRect()}
           </Layer>
@@ -619,6 +873,16 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           canRedo={canRedo}
           onRedo={redo}
           onClearAll={clearAllShapes}
+          hasSelection={selectedShapeIds.length > 0}
+          hasMultiSelection={selectedShapeIds.length >= 2}
+          onGroup={groupSelectedShapes}
+          onUngroup={ungroupSelectedShapes}
+          hasGroupInSelection={shapes.some(
+            (s) => selectedShapeIds.includes(s.id) && !!s.groupId,
+          )}
+          onExportPng={() => exportCanvas('png')}
+          onExportJpeg={() => exportCanvas('jpeg')}
+          hasShapes={shapes.length > 0}
         />
 
         {/* Bottom-center: Zoom indicator */}

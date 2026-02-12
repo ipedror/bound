@@ -45,6 +45,13 @@ vi.mock('firebase/functions', () => ({
   getFunctions: vi.fn(() => ({})),
 }));
 
+const mockClearAll = vi.fn().mockResolvedValue(undefined);
+vi.mock('./appStore', () => ({
+  useAppStore: {
+    getState: () => ({ clearAll: mockClearAll }),
+  },
+}));
+
 // ---- Import AFTER mocks ----
 import { useAuthStore } from './authStore';
 
@@ -348,10 +355,11 @@ describe('AuthStore', () => {
   // ===================================
 
   describe('signOut', () => {
-    it('should call firebaseSignOut', async () => {
+    it('should call firebaseSignOut and clearAll', async () => {
       mockSignOut.mockResolvedValue(undefined);
       await useAuthStore.getState().signOut();
       expect(mockSignOut).toHaveBeenCalledTimes(1);
+      expect(mockClearAll).toHaveBeenCalledTimes(1);
     });
 
     it('should set isAuthLoading during sign out', async () => {
@@ -372,6 +380,14 @@ describe('AuthStore', () => {
       mockSignOut.mockRejectedValue('oops');
       await useAuthStore.getState().signOut();
       expect(useAuthStore.getState().error).toBe('Sign-out failed');
+    });
+
+    it('should still sign out even if clearAll fails', async () => {
+      mockSignOut.mockResolvedValue(undefined);
+      mockClearAll.mockRejectedValueOnce(new Error('storage error'));
+      await useAuthStore.getState().signOut();
+      expect(mockSignOut).toHaveBeenCalledTimes(1);
+      expect(useAuthStore.getState().error).toBeNull();
     });
   });
 

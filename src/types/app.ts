@@ -5,13 +5,14 @@
 import type { Area } from './area';
 import type { Content } from './content';
 import type { Link } from './link';
-import type { Graph, GraphFrame } from './graph';
+import type { Graph, GraphFrame, HierarchyLevelConfig } from './graph';
 
 export interface AppState {
   readonly areas: Area[];
   readonly contents: Content[];
   readonly links: Link[];
   readonly graphFrames: GraphFrame[];
+  readonly hierarchyLevelConfigs?: HierarchyLevelConfig[];
   readonly graph: Graph | null;
   readonly currentAreaId?: string;
   readonly currentContentId?: string;

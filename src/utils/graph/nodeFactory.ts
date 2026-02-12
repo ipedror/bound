@@ -3,7 +3,7 @@
 import type { Content } from '../../types/content';
 import type { Area } from '../../types/area';
 import type { Link } from '../../types/link';
-import type { CytoscapeNode } from '../../types/graph';
+import type { CytoscapeNode, HierarchyLevelConfig } from '../../types/graph';
 import { GRAPH_COLORS } from '../../constants/graph';
 
 /** Minimum distance between any two node centres when auto-placing */
@@ -50,8 +50,10 @@ export class NodeFactory {
    * @param color - Optional custom color for the node
    * @param occupiedPositions - Positions already taken (for safe spacing)
    * @param edgeSegments - Edge line segments to avoid
+   * @param hierarchyDepth - The depth of this content in the hierarchy (0 = root)
+   * @param levelName - Optional name of the hierarchy level
    */
-  static createNode(content: Content, color?: string, occupiedPositions?: { x: number; y: number }[], edgeSegments?: Segment[]): CytoscapeNode {
+  static createNode(content: Content, color?: string, occupiedPositions?: { x: number; y: number }[], edgeSegments?: Segment[], hierarchyDepth?: number, levelName?: string): CytoscapeNode {
     const label = content.emoji
       ? `${content.emoji} ${content.title}`
       : content.title;
@@ -73,6 +75,8 @@ export class NodeFactory {
         title: content.title,
         color: content.nodeColor ?? color ?? GRAPH_COLORS.nodeDefault,
         nodeType: 'content',
+        hierarchyDepth: hierarchyDepth ?? 0,
+        levelName,
       },
       position,
     };
@@ -170,8 +174,10 @@ export class NodeFactory {
 
   /**
    * Create multiple nodes from contents (with safe spacing, avoiding edges)
+   * @param depthMap - Optional map of contentId → hierarchy depth
+   * @param levelConfigs - Optional hierarchy level configs for colors and names
    */
-  static createNodes(contents: Content[], color?: string, links?: Link[]): CytoscapeNode[] {
+  static createNodes(contents: Content[], color?: string, links?: Link[], depthMap?: Map<string, number>, levelConfigs?: HierarchyLevelConfig[]): CytoscapeNode[] {
     const positions: { x: number; y: number }[] = [];
     const positionMap = new Map<string, { x: number; y: number }>();
     // First pass: collect known positions
@@ -196,7 +202,18 @@ export class NodeFactory {
     };
     return contents.map((content) => {
       const segments = buildSegments();
-      const node = NodeFactory.createNode(content, color, positions, segments);
+      const depth = depthMap?.get(content.id);
+      // Resolve level config color and name
+      let nodeColor = color;
+      let levelName: string | undefined;
+      if (depth !== undefined && levelConfigs) {
+        const cfg = levelConfigs.find((c) => c.depth === depth);
+        if (cfg && (cfg.areaScope === 'all' || cfg.areaIds.includes(content.areaId))) {
+          nodeColor = cfg.color;
+          levelName = cfg.name;
+        }
+      }
+      const node = NodeFactory.createNode(content, nodeColor, positions, segments, depth, levelName);
       if (node.position) {
         positions.push(node.position);
         positionMap.set(content.id, node.position);

@@ -16,6 +16,7 @@ export type PropertyType = (typeof PropertyType)[keyof typeof PropertyType];
 export const LinkType = {
   MANUAL: 'manual',
   AUTO: 'auto',
+  PARENT: 'parent',
 } as const;
 export type LinkType = (typeof LinkType)[keyof typeof LinkType];
 
@@ -37,6 +38,7 @@ export const ShapeType = {
   LINE: 'line',
   ARROW: 'arrow',
   TEXT: 'text',
+  IMAGE: 'image',
 } as const;
 export type ShapeType = (typeof ShapeType)[keyof typeof ShapeType];
 

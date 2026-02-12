@@ -9,12 +9,14 @@ interface ColorPickerProps {
   color: string;
   onChange: (color: string) => void;
   label?: string;
+  allowTransparent?: boolean;
 }
 
 export const ColorPicker: React.FC<ColorPickerProps> = React.memo(
-  ({ color, onChange, label }) => {
+  ({ color, onChange, label, allowTransparent }) => {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+    const isTransparent = color === 'transparent';
 
     const handleColorClick = useCallback(
       (newColor: string) => {
@@ -59,14 +61,29 @@ export const ColorPicker: React.FC<ColorPickerProps> = React.memo(
           onClick={() => setIsOpen(!isOpen)}
           style={{
             ...styles.swatch,
-            backgroundColor: color,
+            ...(isTransparent
+              ? { background: 'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 10px 10px' }
+              : { backgroundColor: color }),
           }}
-          title={`Color: ${color}`}
-          aria-label={`Select color, current: ${color}`}
+          title={isTransparent ? 'Transparent' : `Color: ${color}`}
+          aria-label={`Select color, current: ${isTransparent ? 'transparent' : color}`}
         />
         {isOpen && (
           <div style={styles.dropdown}>
             <div style={styles.grid}>
+              {allowTransparent && (
+                <button
+                  type="button"
+                  onClick={() => handleColorClick('transparent')}
+                  style={{
+                    ...styles.colorOption,
+                    background: 'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 10px 10px',
+                    border: color === 'transparent' ? '2px solid #00d4ff' : '2px solid transparent',
+                  }}
+                  title="No fill (transparent)"
+                  aria-label="Select transparent"
+                />
+              )}
               {PREDEFINED_COLORS.map((c) => (
                 <button
                   key={c}
@@ -87,7 +104,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = React.memo(
                 Custom:
                 <input
                   type="color"
-                  value={color}
+                  value={isTransparent ? '#000000' : color}
                   onChange={handleCustomChange}
                   style={styles.customInput}
                 />

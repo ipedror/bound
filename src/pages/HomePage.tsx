@@ -5,13 +5,17 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
+import { useAuthStore } from '../store/authStore';
 import { useShallow } from 'zustand/shallow';
+import WelcomeBanner from '../components/WelcomeBanner';
 
 export default function HomePage() {
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newAreaName, setNewAreaName] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const authUser = useAuthStore((s) => s.user);
 
   const { areas, contents, createArea, deleteArea } = useAppStore(
     useShallow((s) => ({
@@ -57,6 +61,7 @@ export default function HomePage() {
 
   return (
     <div style={styles.container}>
+      <WelcomeBanner uid={authUser?.uid} />
       <header style={styles.header}>
         <h1 style={styles.title}>Your Areas</h1>
         <button style={styles.createButton} onClick={() => setShowCreateModal(true)}>

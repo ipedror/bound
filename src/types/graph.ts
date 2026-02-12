@@ -30,6 +30,18 @@ export interface Graph {
 // Cytoscape.js specific types
 // ============================================================
 
+/**
+ * Configuration for a single hierarchy level.
+ * Defines name, node color, and which areas the level applies to.
+ */
+export interface HierarchyLevelConfig {
+  readonly depth: number; // 0–7
+  readonly name: string;
+  readonly color: string;
+  readonly areaScope: 'all' | 'specific';
+  readonly areaIds: readonly string[];
+}
+
 export interface CytoscapeNodeData {
   readonly id: string;
   readonly contentId: string;
@@ -43,6 +55,10 @@ export interface CytoscapeNodeData {
   readonly nodeType?: 'area' | 'content' | 'frame';
   /** Number of contents inside an area node */
   readonly contentCount?: number;
+  /** Hierarchy depth: 0 = root (no parent), 1 = child, 2 = grandchild, … up to 7 */
+  readonly hierarchyDepth?: number;
+  /** Name of the hierarchy level this node belongs to (from HierarchyLevelConfig) */
+  readonly levelName?: string;
 }
 
 export interface CytoscapeNode {

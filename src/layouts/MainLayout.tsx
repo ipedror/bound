@@ -108,7 +108,6 @@ export default function MainLayout() {
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </button>
-          <span style={styles.appTitle}>Bound</span>
         </Island>
 
         {/* Dropdown menu */}
@@ -376,14 +375,6 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '4px',
-  },
-  appTitle: {
-    fontSize: '14px',
-    fontWeight: '700',
-    color: '#38bdf8',
-    letterSpacing: '0.5px',
-    padding: '0 6px 0 2px',
-    whiteSpace: 'nowrap',
   },
   main: {
     width: '100%',

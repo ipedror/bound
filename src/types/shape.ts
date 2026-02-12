@@ -22,5 +22,7 @@ export interface Shape {
   readonly text?: string; // for text shapes
   readonly maxWidth?: number; // for text shapes - max width before wrapping (0 = no limit)
   readonly points?: readonly number[]; // for line/arrow shapes [x1,y1,x2,y2,...]
+  readonly imageSrc?: string; // for image shapes - base64 data URL
+  readonly groupId?: string; // for grouping shapes together
   readonly createdAt: number;
 }

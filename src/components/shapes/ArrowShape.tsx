@@ -15,11 +15,12 @@ interface ArrowShapeProps {
   isDraggable: boolean;
   onSelect: () => void;
   onUpdate: (updates: Partial<Shape>) => void;
+  onDragStart?: () => void;
   onDragEnd: (position: Position) => void;
 }
 
 export const ArrowShape: React.FC<ArrowShapeProps> = React.memo(
-  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragEnd }) => {
+  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragStart, onDragEnd }) => {
     const shapeRef = useRef<Konva.Arrow>(null);
     const transformerRef = useRef<Konva.Transformer>(null);
 
@@ -86,6 +87,7 @@ export const ArrowShape: React.FC<ArrowShapeProps> = React.memo(
           draggable={isDraggable}
           onClick={onSelect}
           onTap={onSelect}
+          onDragStart={onDragStart}
           onDragEnd={handleDragEnd}
           onTransformEnd={handleTransformEnd}
           hitStrokeWidth={20} // Easier to click

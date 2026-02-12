@@ -4,8 +4,9 @@
 
 import type { AppState } from '../types/app';
 import type { Content } from '../types/content';
-import type { CytoscapeNode, CytoscapeEdge } from '../types/graph';
+import type { CytoscapeNode, CytoscapeEdge, HierarchyLevelConfig } from '../types/graph';
 import { ContentStatus, LinkType } from '../types/enums';
+import { MAX_HIERARCHY_DEPTH } from '../constants/graph';
 import { NodeFactory } from '../utils/graph/nodeFactory';
 import { EdgeFactory } from '../utils/graph/edgeFactory';
 
@@ -26,16 +27,49 @@ export interface GraphStats {
  */
 export class GraphManager {
   /**
-   * Build a graph from contents and links
+   * Compute a map of contentId → hierarchy depth.
+   * Root contents (no parentId, or parent not in set) have depth 0.
+   * Children have depth = parent depth + 1, capped at MAX_HIERARCHY_DEPTH - 1.
    */
-  static buildGraph(state: AppState, areaId?: string): GraphData {
+  static computeDepthMap(contents: Content[]): Map<string, number> {
+    const contentMap = new Map<string, Content>();
+    for (const c of contents) contentMap.set(c.id, c);
+
+    const depthCache = new Map<string, number>();
+    const visited = new Set<string>(); // cycle guard
+
+    const getDepth = (id: string): number => {
+      if (depthCache.has(id)) return depthCache.get(id)!;
+      if (visited.has(id)) return 0; // cycle – treat as root
+      visited.add(id);
+
+      const content = contentMap.get(id);
+      if (!content?.parentId || !contentMap.has(content.parentId)) {
+        depthCache.set(id, 0);
+        return 0;
+      }
+      const parentDepth = getDepth(content.parentId);
+      const depth = Math.min(parentDepth + 1, MAX_HIERARCHY_DEPTH - 1);
+      depthCache.set(id, depth);
+      return depth;
+    };
+
+    for (const c of contents) getDepth(c.id);
+    return depthCache;
+  }
+
+  /**
+   * Build a graph from contents and links, including hierarchy depth info.
+   */
+  static buildGraph(state: AppState, areaId?: string, levelConfigs?: HierarchyLevelConfig[]): GraphData {
     const contents = GraphManager.getContents(state, areaId);
+    const depthMap = GraphManager.computeDepthMap(contents);
     const contentIds = new Set(contents.map((c) => c.id));
     const relevantLinks = state.links.filter(
       (link) =>
         contentIds.has(link.fromContentId) && contentIds.has(link.toContentId),
     );
-    const nodes = NodeFactory.createNodes(contents, undefined, relevantLinks);
+    const nodes = NodeFactory.createNodes(contents, undefined, relevantLinks, depthMap, levelConfigs);
     const edges = EdgeFactory.createEdges(relevantLinks);
     return { nodes, edges };
   }
@@ -192,6 +226,112 @@ export class GraphManager {
       ...state,
       contents: newContents,
     };
+  }
+
+  /**
+   * Build a graph showing descendants of a specific parent content,
+   * up to `maxLevels` deep (default: all levels up to MAX_HIERARCHY_DEPTH).
+   * The parent itself is included as the root node (depth 0 relative).
+   */
+  static buildChildrenGraph(
+    state: AppState,
+    parentContentId: string,
+    maxLevels: number = MAX_HIERARCHY_DEPTH,
+    levelConfigs?: HierarchyLevelConfig[],
+  ): GraphData {
+    const parent = state.contents.find((c) => c.id === parentContentId);
+    if (!parent) return { nodes: [], edges: [] };
+
+    // Collect descendants BFS, up to maxLevels
+    const collected: Content[] = [parent];
+    const collectedIds = new Set<string>([parent.id]);
+    let frontier = [parent.id];
+    for (let level = 0; level < maxLevels && frontier.length > 0; level++) {
+      const nextFrontier: string[] = [];
+      for (const pid of frontier) {
+        for (const c of state.contents) {
+          if (c.parentId === pid && !collectedIds.has(c.id)) {
+            collected.push(c);
+            collectedIds.add(c.id);
+            nextFrontier.push(c.id);
+          }
+        }
+      }
+      frontier = nextFrontier;
+    }
+
+    const depthMap = GraphManager.computeDepthMap(collected);
+    // Rebase depths: the selected parent becomes depth 0
+    const parentDepth = depthMap.get(parentContentId) ?? 0;
+    const rebasedMap = new Map<string, number>();
+    for (const [id, d] of depthMap) {
+      rebasedMap.set(id, Math.max(0, d - parentDepth));
+    }
+
+    const relevantLinks = state.links.filter(
+      (link) =>
+        collectedIds.has(link.fromContentId) && collectedIds.has(link.toContentId),
+    );
+    const nodes = NodeFactory.createNodes(collected, undefined, relevantLinks, rebasedMap, levelConfigs);
+
+    // Also include parent-child edges among collected contents
+    const parentChildEdges = GraphManager.buildParentChildEdges(collected);
+    const linkEdges = EdgeFactory.createEdges(relevantLinks);
+
+    return { nodes, edges: [...linkEdges, ...parentChildEdges] };
+  }
+
+  /**
+   * Build parent-child edges for the current graph.
+   * Each child content produces a dashed edge pointing to its parent.
+   * Only includes edges where both parent and child are in the given content set.
+   */
+  static buildParentChildEdges(contents: Content[]): CytoscapeEdge[] {
+    const contentIds = new Set(contents.map((c) => c.id));
+    const edges: CytoscapeEdge[] = [];
+    for (const content of contents) {
+      if (content.parentId && contentIds.has(content.parentId)) {
+        edges.push({
+          data: {
+            id: `parent:${content.id}:${content.parentId}`,
+            source: content.id,
+            target: content.parentId,
+            linkId: `parent:${content.id}:${content.parentId}`,
+            linkType: LinkType.PARENT,
+          },
+        });
+      }
+    }
+    return edges;
+  }
+
+  /**
+   * Build a full graph with hierarchy info, optionally filtered to maxLevels of depth.
+   * When maxLevels < MAX_HIERARCHY_DEPTH, nodes deeper than maxLevels are excluded.
+   */
+  static buildHierarchyGraph(
+    state: AppState,
+    areaId?: string,
+    maxLevels: number = MAX_HIERARCHY_DEPTH,
+    levelConfigs?: HierarchyLevelConfig[],
+  ): GraphData {
+    let contents = GraphManager.getContents(state, areaId);
+    const depthMap = GraphManager.computeDepthMap(contents);
+
+    // Filter by max depth
+    if (maxLevels < MAX_HIERARCHY_DEPTH) {
+      contents = contents.filter((c) => (depthMap.get(c.id) ?? 0) < maxLevels);
+    }
+
+    const contentIds = new Set(contents.map((c) => c.id));
+    const relevantLinks = state.links.filter(
+      (link) =>
+        contentIds.has(link.fromContentId) && contentIds.has(link.toContentId),
+    );
+    const nodes = NodeFactory.createNodes(contents, undefined, relevantLinks, depthMap, levelConfigs);
+    const linkEdges = EdgeFactory.createEdges(relevantLinks);
+    const parentChildEdges = GraphManager.buildParentChildEdges(contents);
+    return { nodes, edges: [...linkEdges, ...parentChildEdges] };
   }
 
   /**

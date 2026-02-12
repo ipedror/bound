@@ -2,7 +2,7 @@
 // ContentPage - Full-screen canvas with floating panels
 // ============================================================
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 import { useShallow } from 'zustand/shallow';
@@ -25,8 +25,37 @@ export default function ContentPage() {
   const [propsOpen, setPropsOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
+  const [parentOpen, setParentOpen] = useState(false);
+  const [splitRatio, setSplitRatio] = useState(0.5);
   const propsRef = useRef<HTMLDivElement>(null);
   const linksRef = useRef<HTMLDivElement>(null);
+  const parentRef = useRef<HTMLDivElement>(null);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const startX = e.clientX;
+    const startRatio = splitRatio;
+    const containerWidth = container.getBoundingClientRect().width;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      const newRatio = Math.min(0.8, Math.max(0.2, startRatio + dx / containerWidth));
+      setSplitRatio(newRatio);
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [splitRatio]);
 
   const {
     areas,
@@ -73,15 +102,38 @@ export default function ContentPage() {
     [allContents, contentId, linkedContentIds],
   );
 
+  // Parent-child hierarchy
+  const parentContent = useMemo(
+    () => content?.parentId ? allContents.find((c) => c.id === content.parentId) : undefined,
+    [allContents, content],
+  );
+  const childContents = useMemo(
+    () => allContents.filter((c) => c.parentId === contentId),
+    [allContents, contentId],
+  );
+  // Contents eligible to be parent (same area, not self, not current children, not current parent to avoid cycles)
+  const availableParents = useMemo(
+    () => allContents.filter((c) => {
+      if (c.id === contentId) return false;
+      if (!content) return false;
+      if (c.areaId !== content.areaId) return false;
+      // Prevent setting a child (or deeper descendant) as parent
+      if (c.parentId === contentId) return false;
+      return true;
+    }),
+    [allContents, contentId, content],
+  );
+
   // Close panels on click outside
   useEffect(() => {
     const handle = (e: MouseEvent) => {
       if (propsOpen && propsRef.current && !propsRef.current.contains(e.target as Node)) setPropsOpen(false);
       if (linksOpen && linksRef.current && !linksRef.current.contains(e.target as Node)) setLinksOpen(false);
+      if (parentOpen && parentRef.current && !parentRef.current.contains(e.target as Node)) setParentOpen(false);
     };
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
-  }, [propsOpen, linksOpen]);
+  }, [propsOpen, linksOpen, parentOpen]);
 
   if (!content) {
     return (
@@ -142,9 +194,9 @@ export default function ContentPage() {
   return (
     <div style={styles.fullScreen}>
       {/* Split-view container */}
-      <div style={styles.splitContainer}>
+      <div style={styles.splitContainer} ref={splitContainerRef}>
         {/* Left: Canvas (full or half) — all floating UI lives inside here */}
-        <div style={{ ...styles.splitPanel, flex: showGraph ? 1 : undefined, width: showGraph ? undefined : '100%' }}>
+        <div style={{ ...styles.splitPanel, flex: showGraph ? `0 0 ${splitRatio * 100}%` : undefined, width: showGraph ? undefined : '100%' }}>
           <CanvasEditor contentId={content.id} />
 
           {/* Floating split-view toggle (top-left) */}
@@ -307,6 +359,84 @@ export default function ContentPage() {
                 </Island>
               )}
             </div>
+
+            {/* Parent / Children toggle */}
+            <div ref={parentRef} style={{ position: 'relative' }}>
+              <Island padding={4}>
+                <button
+                  style={styles.panelToggle}
+                  onClick={() => setParentOpen(!parentOpen)}
+                  title="Parent & Children"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="5" r="3" />
+                    <line x1="12" y1="8" x2="12" y2="14" />
+                    <circle cx="7" cy="19" r="3" />
+                    <circle cx="17" cy="19" r="3" />
+                    <line x1="12" y1="14" x2="7" y2="16" />
+                    <line x1="12" y1="14" x2="17" y2="16" />
+                  </svg>
+                  <span style={styles.panelToggleLabel}>Hierarchy</span>
+                  {(parentContent || childContents.length > 0) && (
+                    <span style={styles.panelBadge}>{(parentContent ? 1 : 0) + childContents.length}</span>
+                  )}
+                </button>
+              </Island>
+
+              {/* Parent / Children dropdown */}
+              {parentOpen && (
+                <Island padding={12} style={styles.dropdownPanel}>
+                  {/* Parent selector */}
+                  <div style={styles.panelHeader}>
+                    <h3 style={styles.panelTitle}>Parent</h3>
+                  </div>
+                  {parentContent ? (
+                    <div style={styles.linkItem}>
+                      <span style={styles.linkName} onClick={() => navigate(`/content/${parentContent.id}`)}>
+                        {parentContent.emoji ? `${parentContent.emoji} ` : ''}{parentContent.title}
+                      </span>
+                      <button style={styles.removeBtn} onClick={() => updateContent(content.id, { parentId: undefined })}>×</button>
+                    </div>
+                  ) : (
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          updateContent(content.id, { parentId: e.target.value });
+                        }
+                      }}
+                      style={styles.select}
+                    >
+                      <option value="">Set parent…</option>
+                      {availableParents.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.emoji ? `${c.emoji} ` : ''}{c.title}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Children list */}
+                  <div style={{ ...styles.panelHeader, marginTop: '12px' }}>
+                    <h3 style={styles.panelTitle}>Children</h3>
+                  </div>
+                  {childContents.length === 0 ? (
+                    <p style={styles.emptyText}>No children</p>
+                  ) : (
+                    <div style={styles.linkList}>
+                      {childContents.map((child) => (
+                        <div key={child.id} style={styles.linkItem}>
+                          <span style={styles.linkName} onClick={() => navigate(`/content/${child.id}`)}>
+                            {child.emoji ? `${child.emoji} ` : ''}{child.title}
+                          </span>
+                          <button style={styles.removeBtn} onClick={() => updateContent(child.id, { parentId: undefined })} title="Remove from parent">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Island>
+              )}
+            </div>
           </div>
 
           {/* Property Modal */}
@@ -363,9 +493,14 @@ export default function ContentPage() {
         {/* Right: Graph (only when split) */}
         {showGraph && area && (
           <>
-            <div style={styles.splitDivider} />
-            <div style={styles.splitPanel}>
-              <GraphView areaId={area.id} height="100%" width="100%" onNodeClick={(nodeId) => navigate(`/content/${nodeId}`)} />
+            <div
+              style={styles.splitDivider}
+              onMouseDown={handleDividerMouseDown}
+            >
+              <div style={styles.splitDividerHandle} />
+            </div>
+            <div style={{ ...styles.splitPanel, flex: `0 0 ${(1 - splitRatio) * 100}%` }}>
+              <GraphView areaId={area.id} height="100%" width="100%" enableLayers onNodeClick={(nodeId) => navigate(`/content/${nodeId}`)} />
             </div>
           </>
         )}
@@ -392,15 +527,26 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
   },
   splitDivider: {
-    width: '3px',
+    width: '6px',
     backgroundColor: '#1e293b',
     cursor: 'col-resize',
     flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'background-color 0.15s',
+    position: 'relative',
   },
-  // Top-left: split-view toggle (below the canvas toolbar)
+  splitDividerHandle: {
+    width: '3px',
+    height: '40px',
+    borderRadius: '2px',
+    backgroundColor: '#475569',
+  },
+  // Top-left: split-view toggle (below menu button)
   topLeft: {
     position: 'absolute',
-    top: '60px',
+    top: '68px',
     left: '12px',
     zIndex: 50,
   },

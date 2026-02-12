@@ -13,12 +13,13 @@ interface TextShapeProps {
   shape: Shape;
   isSelected: boolean;  isDraggable: boolean;  onSelect: (e?: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<Shape>) => void;
+  onDragStart?: () => void;
   onDragEnd: (position: Position) => void;
   onDoubleClick?: (shapeId: string) => void;
 }
 
 export const TextShape: React.FC<TextShapeProps> = React.memo(
-  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragEnd, onDoubleClick }) => {
+  ({ shape, isSelected, isDraggable, onSelect, onUpdate, onDragStart, onDragEnd, onDoubleClick }) => {
     const shapeRef = useRef<Konva.Text>(null);
     const transformerRef = useRef<Konva.Transformer>(null);
     const [isEditing, setIsEditing] = useState(false);
@@ -166,6 +167,7 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
           onTap={onSelect as unknown as (evt: Konva.KonvaEventObject<TouchEvent>) => void}
           onDblClick={handleDoubleClick}
           onDblTap={handleDoubleClick}
+          onDragStart={onDragStart}
           onDragEnd={handleDragEnd}
           onTransformEnd={handleTransformEnd}
           visible={!isEditing}

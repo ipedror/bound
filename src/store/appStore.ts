@@ -11,7 +11,7 @@ import type { Shape } from '../types/shape';
 import type { Property } from '../types/property';
 import type { Link } from '../types/link';
 import type { LinkType } from '../types/enums';
-import type { GraphFrame } from '../types/graph';
+import type { GraphFrame, HierarchyLevelConfig } from '../types/graph';
 import { getDefaultState, SCHEMA_VERSION } from '../constants/schema';
 import { ContentManager } from '../managers/ContentManager';
 import { AreaManager } from '../managers/AreaManager';
@@ -86,6 +86,10 @@ export interface AppStoreActions {
   addGraphFrame: (frame: GraphFrame) => void;
   updateGraphFrame: (frameId: string, updates: Partial<GraphFrame>) => void;
   deleteGraphFrame: (frameId: string) => void;
+
+  // Hierarchy level config operations
+  setHierarchyLevelConfigs: (configs: HierarchyLevelConfig[]) => void;
+  updateHierarchyLevelConfig: (depth: number, updates: Partial<HierarchyLevelConfig>) => void;
 
   // Storage operations
   loadFromStorage: () => Promise<void>;
@@ -629,6 +633,32 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
       const newState = {
         ...state,
         graphFrames: (state.graphFrames ?? []).filter((f) => f.id !== frameId),
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
+    },
+
+    // Hierarchy level config operations
+    setHierarchyLevelConfigs: (configs: HierarchyLevelConfig[]) => {
+      const { state } = get();
+      const newState = {
+        ...state,
+        hierarchyLevelConfigs: configs,
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
+    },
+
+    updateHierarchyLevelConfig: (depth: number, updates: Partial<HierarchyLevelConfig>) => {
+      const { state } = get();
+      const configs = [...(state.hierarchyLevelConfigs ?? [])];
+      const idx = configs.findIndex((c) => c.depth === depth);
+      if (idx !== -1) {
+        configs[idx] = { ...configs[idx], ...updates };
+      }
+      const newState = {
+        ...state,
+        hierarchyLevelConfigs: configs,
         updatedAt: Date.now(),
       };
       get().setState(newState);

@@ -395,4 +395,71 @@ describe('AppStore', () => {
       expect(error).toBeNull();
     });
   });
+
+  describe('Hierarchy level config operations', () => {
+    it('should set hierarchy level configs', () => {
+      const configs = [
+        { depth: 0, name: 'Chapter', color: '#ff0000', areaScope: 'all' as const, areaIds: [] },
+        { depth: 1, name: 'Section', color: '#00ff00', areaScope: 'all' as const, areaIds: [] },
+      ];
+      useAppStore.getState().setHierarchyLevelConfigs(configs);
+      const { state } = useAppStore.getState();
+      expect(state.hierarchyLevelConfigs).toHaveLength(2);
+      expect(state.hierarchyLevelConfigs![0].name).toBe('Chapter');
+      expect(state.hierarchyLevelConfigs![1].name).toBe('Section');
+    });
+
+    it('should update a single hierarchy level config by depth', () => {
+      const configs = [
+        { depth: 0, name: 'Level 1', color: '#ff0000', areaScope: 'all' as const, areaIds: [] },
+        { depth: 1, name: 'Level 2', color: '#00ff00', areaScope: 'all' as const, areaIds: [] },
+      ];
+      useAppStore.getState().setHierarchyLevelConfigs(configs);
+      useAppStore.getState().updateHierarchyLevelConfig(0, { name: 'Root', color: '#0000ff' });
+      const { state } = useAppStore.getState();
+      expect(state.hierarchyLevelConfigs![0].name).toBe('Root');
+      expect(state.hierarchyLevelConfigs![0].color).toBe('#0000ff');
+      // Other config unchanged
+      expect(state.hierarchyLevelConfigs![1].name).toBe('Level 2');
+    });
+
+    it('should update area scope to specific', () => {
+      const areaId = useAppStore.getState().createArea('Test Area');
+      const configs = [
+        { depth: 0, name: 'Level 1', color: '#ff0000', areaScope: 'all' as const, areaIds: [] },
+      ];
+      useAppStore.getState().setHierarchyLevelConfigs(configs);
+      useAppStore.getState().updateHierarchyLevelConfig(0, {
+        areaScope: 'specific',
+        areaIds: [areaId],
+      });
+      const { state } = useAppStore.getState();
+      expect(state.hierarchyLevelConfigs![0].areaScope).toBe('specific');
+      expect(state.hierarchyLevelConfigs![0].areaIds).toContain(areaId);
+    });
+
+    it('should not crash when updating non-existent depth', () => {
+      const configs = [
+        { depth: 0, name: 'Level 1', color: '#ff0000', areaScope: 'all' as const, areaIds: [] },
+      ];
+      useAppStore.getState().setHierarchyLevelConfigs(configs);
+      useAppStore.getState().updateHierarchyLevelConfig(5, { name: 'Nope' });
+      const { state } = useAppStore.getState();
+      // Original config unchanged
+      expect(state.hierarchyLevelConfigs).toHaveLength(1);
+      expect(state.hierarchyLevelConfigs![0].name).toBe('Level 1');
+    });
+
+    it('should persist configs through state replacement', () => {
+      const configs = [
+        { depth: 0, name: 'Root', color: '#111111', areaScope: 'all' as const, areaIds: [] },
+      ];
+      useAppStore.getState().setHierarchyLevelConfigs(configs);
+      // Create an area (triggers setState internally) - configs should survive
+      useAppStore.getState().createArea('New Area');
+      const { state } = useAppStore.getState();
+      expect(state.hierarchyLevelConfigs).toHaveLength(1);
+      expect(state.hierarchyLevelConfigs![0].name).toBe('Root');
+    });
+  });
 });

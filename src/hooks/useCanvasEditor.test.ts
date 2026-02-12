@@ -608,5 +608,234 @@ describe('useCanvasEditor', () => {
       expect(types).toContain(ShapeType.ARROW);
       expect(types).toContain(ShapeType.TEXT);
     });
+
+    it('should handle image shape type', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      const image = ShapeFactory.createImage(
+        'data:image/png;base64,iVBOR',
+        { x: 50, y: 50 },
+        { width: 200, height: 150 },
+        DEFAULT_CANVAS_STATE,
+      );
+
+      act(() => {
+        result.current.addShape(image);
+      });
+
+      expect(result.current.shapes).toHaveLength(1);
+      expect(result.current.shapes[0].type).toBe(ShapeType.IMAGE);
+      expect(result.current.shapes[0].imageSrc).toBe('data:image/png;base64,iVBOR');
+      expect(result.current.shapes[0].dimension).toEqual({ width: 200, height: 150 });
+    });
+  });
+
+  describe('Grouping Operations', () => {
+    it('should group selected shapes', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      const rect = ShapeFactory.createRect({ x: 10, y: 10 }, { width: 100, height: 50 }, DEFAULT_CANVAS_STATE);
+      const ellipse = ShapeFactory.createEllipse({ x: 150, y: 10 }, { width: 80, height: 60 }, DEFAULT_CANVAS_STATE);
+
+      act(() => {
+        result.current.addShape(rect);
+      });
+      act(() => {
+        result.current.addShape(ellipse);
+      });
+
+      act(() => {
+        result.current.setSelectedShapeIds([rect.id, ellipse.id]);
+      });
+
+      act(() => {
+        result.current.groupSelectedShapes();
+      });
+
+      const shapes = result.current.shapes;
+      expect(shapes[0].groupId).toBeDefined();
+      expect(shapes[1].groupId).toBeDefined();
+      expect(shapes[0].groupId).toBe(shapes[1].groupId);
+    });
+
+    it('should not group with fewer than 2 selected shapes', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      const rect = ShapeFactory.createRect({ x: 10, y: 10 }, { width: 100, height: 50 }, DEFAULT_CANVAS_STATE);
+
+      act(() => {
+        result.current.addShape(rect);
+      });
+
+      act(() => {
+        result.current.setSelectedShapeIds([rect.id]);
+      });
+
+      act(() => {
+        result.current.groupSelectedShapes();
+      });
+
+      expect(result.current.shapes[0].groupId).toBeUndefined();
+    });
+
+    it('should ungroup selected shapes', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      const rect = ShapeFactory.createRect({ x: 10, y: 10 }, { width: 100, height: 50 }, DEFAULT_CANVAS_STATE);
+      const ellipse = ShapeFactory.createEllipse({ x: 150, y: 10 }, { width: 80, height: 60 }, DEFAULT_CANVAS_STATE);
+
+      act(() => {
+        result.current.addShape(rect);
+      });
+      act(() => {
+        result.current.addShape(ellipse);
+      });
+
+      // Group them
+      act(() => {
+        result.current.setSelectedShapeIds([rect.id, ellipse.id]);
+      });
+      act(() => {
+        result.current.groupSelectedShapes();
+      });
+
+      expect(result.current.shapes[0].groupId).toBeDefined();
+
+      // Now ungroup
+      act(() => {
+        result.current.ungroupSelectedShapes();
+      });
+
+      expect(result.current.shapes[0].groupId).toBeUndefined();
+      expect(result.current.shapes[1].groupId).toBeUndefined();
+    });
+
+    it('should select all shapes in a group', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      const rect = ShapeFactory.createRect({ x: 10, y: 10 }, { width: 100, height: 50 }, DEFAULT_CANVAS_STATE);
+      const ellipse = ShapeFactory.createEllipse({ x: 150, y: 10 }, { width: 80, height: 60 }, DEFAULT_CANVAS_STATE);
+      const text = ShapeFactory.createText('Test', { x: 300, y: 10 }, DEFAULT_CANVAS_STATE);
+
+      act(() => {
+        result.current.addShape(rect);
+      });
+      act(() => {
+        result.current.addShape(ellipse);
+      });
+      act(() => {
+        result.current.addShape(text);
+      });
+
+      // Group rect and ellipse
+      act(() => {
+        result.current.setSelectedShapeIds([rect.id, ellipse.id]);
+      });
+      act(() => {
+        result.current.groupSelectedShapes();
+      });
+
+      const groupId = result.current.shapes[0].groupId!;
+
+      // Clear selection
+      act(() => {
+        result.current.setSelectedShapeIds([]);
+      });
+
+      // Select group
+      act(() => {
+        result.current.selectGroup(groupId);
+      });
+
+      expect(result.current.selectedShapeIds).toHaveLength(2);
+      expect(result.current.selectedShapeIds).toContain(rect.id);
+      expect(result.current.selectedShapeIds).toContain(ellipse.id);
+      expect(result.current.selectedShapeIds).not.toContain(text.id);
+    });
+
+    it('should support undo after grouping', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      const rect = ShapeFactory.createRect({ x: 10, y: 10 }, { width: 100, height: 50 }, DEFAULT_CANVAS_STATE);
+      const ellipse = ShapeFactory.createEllipse({ x: 150, y: 10 }, { width: 80, height: 60 }, DEFAULT_CANVAS_STATE);
+
+      act(() => {
+        result.current.addShape(rect);
+      });
+      act(() => {
+        result.current.addShape(ellipse);
+      });
+
+      act(() => {
+        result.current.setSelectedShapeIds([rect.id, ellipse.id]);
+      });
+
+      act(() => {
+        result.current.groupSelectedShapes();
+      });
+
+      expect(result.current.shapes[0].groupId).toBeDefined();
+      expect(result.current.shapes[1].groupId).toBeDefined();
+
+      // Undo grouping
+      act(() => {
+        result.current.undo();
+      });
+
+      // Shapes should still exist but without groupId
+      expect(result.current.shapes).toHaveLength(2);
+      expect(result.current.shapes[0].groupId).toBeUndefined();
+      expect(result.current.shapes[1].groupId).toBeUndefined();
+    });
+
+    it('should ungroup only the groups that intersect selection', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      const r1 = ShapeFactory.createRect({ x: 10, y: 10 }, { width: 50, height: 50 }, DEFAULT_CANVAS_STATE);
+      const r2 = ShapeFactory.createRect({ x: 70, y: 10 }, { width: 50, height: 50 }, DEFAULT_CANVAS_STATE);
+      const r3 = ShapeFactory.createRect({ x: 130, y: 10 }, { width: 50, height: 50 }, DEFAULT_CANVAS_STATE);
+      const r4 = ShapeFactory.createRect({ x: 190, y: 10 }, { width: 50, height: 50 }, DEFAULT_CANVAS_STATE);
+
+      act(() => { result.current.addShape(r1); });
+      act(() => { result.current.addShape(r2); });
+      act(() => { result.current.addShape(r3); });
+      act(() => { result.current.addShape(r4); });
+
+      // Group r1+r2
+      act(() => {
+        result.current.setSelectedShapeIds([r1.id, r2.id]);
+      });
+      act(() => {
+        result.current.groupSelectedShapes();
+      });
+      const groupA = result.current.shapes[0].groupId!;
+
+      // Group r3+r4
+      act(() => {
+        result.current.setSelectedShapeIds([r3.id, r4.id]);
+      });
+      act(() => {
+        result.current.groupSelectedShapes();
+      });
+      const groupB = result.current.shapes[2].groupId!;
+
+      expect(groupA).not.toBe(groupB);
+
+      // Ungroup only group A (select r1)
+      act(() => {
+        result.current.setSelectedShapeIds([r1.id]);
+      });
+      act(() => {
+        result.current.ungroupSelectedShapes();
+      });
+
+      // r1 and r2 should be ungrouped
+      const s = result.current.shapes;
+      expect(s.find((x) => x.id === r1.id)?.groupId).toBeUndefined();
+      expect(s.find((x) => x.id === r2.id)?.groupId).toBeUndefined();
+      // r3 and r4 should still be grouped
+      expect(s.find((x) => x.id === r3.id)?.groupId).toBe(groupB);
+      expect(s.find((x) => x.id === r4.id)?.groupId).toBe(groupB);
+    });
   });
 });

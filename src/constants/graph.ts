@@ -2,7 +2,7 @@
 // Graph Constants - Cytoscape styles, layouts, defaults
 // ============================================================
 
-import type { GraphViewState, LayoutName } from '../types/graph';
+import type { GraphViewState, LayoutName, HierarchyLevelConfig } from '../types/graph';
 
 /**
  * Default graph view state
@@ -28,6 +28,7 @@ export const GRAPH_COLORS = {
   nodeBorderSelected: '#ffbe0b',
   edgeManual: '#8338ec',
   edgeAuto: '#06ffa5',
+  edgeParent: '#f59e0b',
   edgeSelected: '#ffbe0b',
   text: '#f1f1f1',
 } as const;
@@ -41,8 +42,7 @@ export const CYTOSCAPE_STYLE = [
     selector: 'node',
     style: {
       'background-color': 'data(color)',
-      'border-color': GRAPH_COLORS.nodeBorder,
-      'border-width': 2,
+      'border-width': 0,
       'text-valign': 'bottom',
       'text-halign': 'center',
       'text-margin-y': 8,
@@ -80,7 +80,7 @@ export const CYTOSCAPE_STYLE = [
   {
     selector: 'node:selected',
     style: {
-      'border-width': 4,
+      'border-width': 3,
       'border-color': GRAPH_COLORS.nodeBorderSelected,
       'background-color': GRAPH_COLORS.nodeSelected,
     },
@@ -96,15 +96,6 @@ export const CYTOSCAPE_STYLE = [
       width: 2,
       opacity: 0.8,
       'curve-style': 'bezier',
-    },
-  },
-  // Per-edge custom color
-  {
-    selector: 'edge[color]',
-    style: {
-      'line-color': 'data(color)',
-      'target-arrow-color': 'data(color)',
-      'source-arrow-color': 'data(color)',
     },
   },
   // Per-edge line style: dashed
@@ -130,12 +121,43 @@ export const CYTOSCAPE_STYLE = [
       'line-style': 'dashed',
     },
   },
+  // Edge parent links (dashed amber arrow to parent)
+  {
+    selector: 'edge[linkType = "parent"]',
+    style: {
+      'line-color': GRAPH_COLORS.edgeParent,
+      'target-arrow-color': GRAPH_COLORS.edgeParent,
+      'target-arrow-shape': 'triangle',
+      'line-style': 'dashed',
+      width: 2,
+      opacity: 0.7,
+    },
+  },
+  // Per-edge custom color (after linkType rules so custom color wins)
+  {
+    selector: 'edge[color]',
+    style: {
+      'line-color': 'data(color)',
+      'target-arrow-color': 'data(color)',
+      'source-arrow-color': 'data(color)',
+    },
+  },
   // Edge selected state
   {
     selector: 'edge:selected',
     style: {
       'line-color': GRAPH_COLORS.edgeSelected,
       'target-arrow-color': GRAPH_COLORS.edgeSelected,
+      width: 3,
+    },
+  },
+  // Custom color overrides selected state too (entire arrow stays custom color)
+  {
+    selector: 'edge[color]:selected',
+    style: {
+      'line-color': 'data(color)',
+      'target-arrow-color': 'data(color)',
+      'source-arrow-color': 'data(color)',
       width: 3,
     },
   },
@@ -158,8 +180,7 @@ export const CYTOSCAPE_STYLE = [
       height: 70,
       'font-size': 14,
       'font-weight': 'bold',
-      'border-width': 3,
-      'border-style': 'double',
+      'border-width': 0,
       shape: 'round-rectangle',
       'text-max-width': '120px',
     },
@@ -183,6 +204,22 @@ export const CYTOSCAPE_STYLE = [
       'z-index-compare': 'manual',
     },
   },
+  // Hierarchy depth 0 = root (largest)
+  { selector: 'node[hierarchyDepth = 0]', style: { width: 60, height: 60, 'font-size': 13 } },
+  // Hierarchy depth 1
+  { selector: 'node[hierarchyDepth = 1]', style: { width: 50, height: 50, 'font-size': 12 } },
+  // Hierarchy depth 2
+  { selector: 'node[hierarchyDepth = 2]', style: { width: 42, height: 42, 'font-size': 11 } },
+  // Hierarchy depth 3
+  { selector: 'node[hierarchyDepth = 3]', style: { width: 36, height: 36, 'font-size': 10 } },
+  // Hierarchy depth 4
+  { selector: 'node[hierarchyDepth = 4]', style: { width: 30, height: 30, 'font-size': 9 } },
+  // Hierarchy depth 5
+  { selector: 'node[hierarchyDepth = 5]', style: { width: 26, height: 26, 'font-size': 9 } },
+  // Hierarchy depth 6
+  { selector: 'node[hierarchyDepth = 6]', style: { width: 22, height: 22, 'font-size': 8 } },
+  // Hierarchy depth 7
+  { selector: 'node[hierarchyDepth = 7]', style: { width: 20, height: 20, 'font-size': 8 } },
 ];
 
 /**
@@ -238,6 +275,43 @@ export const LAYOUT_OPTIONS: Record<LayoutName, object> = {
     spacingFactor: 1.5,
   },
 };
+
+/**
+ * Maximum hierarchy depth (8 levels: 0..7)
+ */
+export const MAX_HIERARCHY_DEPTH = 8;
+
+/**
+ * Node sizes per hierarchy level (index = depth, value = diameter)
+ * Level 0 (root) is largest, each subsequent level is smaller.
+ */
+export const HIERARCHY_NODE_SIZES = [60, 50, 42, 36, 30, 26, 22, 20];
+
+/**
+ * Default colors for each hierarchy level (0–7)
+ */
+export const DEFAULT_LEVEL_COLORS = [
+  '#38bdf8', // sky-400 (root)
+  '#818cf8', // indigo-400
+  '#a78bfa', // violet-400
+  '#f472b6', // pink-400
+  '#fb923c', // orange-400
+  '#34d399', // emerald-400
+  '#fbbf24', // amber-400
+  '#f87171', // red-400
+];
+
+/**
+ * Default hierarchy level configurations
+ */
+export const DEFAULT_HIERARCHY_LEVEL_CONFIGS: HierarchyLevelConfig[] =
+  Array.from({ length: MAX_HIERARCHY_DEPTH }, (_, i) => ({
+    depth: i,
+    name: `Level ${i + 1}`,
+    color: DEFAULT_LEVEL_COLORS[i],
+    areaScope: 'all' as const,
+    areaIds: [],
+  }));
 
 /**
  * Graph dimensions

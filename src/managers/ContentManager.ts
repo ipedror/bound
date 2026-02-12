@@ -288,6 +288,45 @@ export class ContentManager {
   }
 
   /**
+   * Get child contents of a given parent content.
+   */
+  static getChildContents(parentId: string, state: AppState): Content[] {
+    return state.contents.filter((c) => c.parentId === parentId);
+  }
+
+  /**
+   * Get the parent content of a given content, if any.
+   */
+  static getParentContent(contentId: string, state: AppState): Content | undefined {
+    const content = this.getContentById(contentId, state);
+    if (!content?.parentId) return undefined;
+    return this.getContentById(content.parentId, state);
+  }
+
+  /**
+   * Get all contents that have no parent (root-level contents).
+   */
+  static getRootContents(state: AppState, areaId?: string): Content[] {
+    return state.contents.filter((c) => {
+      const inArea = areaId ? c.areaId === areaId : true;
+      return inArea && !c.parentId;
+    });
+  }
+
+  /**
+   * Get all contents that are parents (have at least one child).
+   */
+  static getParentContents(state: AppState, areaId?: string): Content[] {
+    const parentIds = new Set(
+      state.contents.filter((c) => c.parentId).map((c) => c.parentId!),
+    );
+    return state.contents.filter((c) => {
+      const inArea = areaId ? c.areaId === areaId : true;
+      return inArea && parentIds.has(c.id);
+    });
+  }
+
+  /**
    * Validate a Content and return any errors.
    */
   static validateContent(content: Content): string[] {

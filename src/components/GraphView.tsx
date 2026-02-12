@@ -10,9 +10,11 @@ import { useGraphView } from '../hooks/useGraphView';
 import { useAppStore } from '../store/appStore';
 import { useShallow } from 'zustand/shallow';
 import { GraphControls } from './GraphControls';
+import type { GraphLayerMode } from './GraphControls';
 import { Island } from './Island';
-import { CYTOSCAPE_STYLE, LAYOUT_OPTIONS, GRAPH_COLORS } from '../constants/graph';
+import { CYTOSCAPE_STYLE, LAYOUT_OPTIONS, GRAPH_COLORS, DEFAULT_HIERARCHY_LEVEL_CONFIGS } from '../constants/graph';
 import { GraphManager } from '../managers/GraphManager';
+import { LevelConfigPanel } from './LevelConfigPanel';
 import type { LayoutName, GraphFrame } from '../types/graph';
 import type { CytoscapeNode } from '../types/graph';
 import { LinkType, EdgeLineStyle, EdgeArrowMode } from '../types/enums';
@@ -71,8 +73,16 @@ export const GraphView = memo(function GraphView({
   const [isEditingZoom, setIsEditingZoom] = useState(false);
 
   // Layer mode state
-  const [layerMode, setLayerMode] = useState(false);
+  const [layerMode, setLayerMode] = useState<GraphLayerMode>('contents');
   const [drillAreaId, setDrillAreaId] = useState<string | undefined>();
+  // Children layer: which parent's children to show
+  const [childrenParentId, setChildrenParentId] = useState<string | undefined>();
+  // Toggle to show parent-child dashed edges in contents view
+  const [showParentChildEdges, setShowParentChildEdges] = useState(false);
+  // Max hierarchy levels to display (1–8)
+  const [maxHierarchyLevels, setMaxHierarchyLevels] = useState(8);
+  // Level config panel visibility
+  const [showLevelConfig, setShowLevelConfig] = useState(false);
 
   // Frame drawing state
   const [isDrawingFrame, setIsDrawingFrame] = useState(false);
@@ -95,7 +105,7 @@ export const GraphView = memo(function GraphView({
   const {
     updateContent, allContents, createLink, deleteLink, updateLink, state: appState,
     areas, addGraphFrame, updateGraphFrame, deleteGraphFrame,
-    updateAreaNodePosition,
+    updateAreaNodePosition, hierarchyLevelConfigs, setHierarchyLevelConfigs, updateHierarchyLevelConfig,
   } = useAppStore(
     useShallow((s) => ({
       updateContent: s.updateContent,
@@ -109,6 +119,9 @@ export const GraphView = memo(function GraphView({
       updateGraphFrame: s.updateGraphFrame,
       deleteGraphFrame: s.deleteGraphFrame,
       updateAreaNodePosition: s.updateAreaNodePosition,
+      hierarchyLevelConfigs: s.state.hierarchyLevelConfigs,
+      setHierarchyLevelConfigs: s.setHierarchyLevelConfigs,
+      updateHierarchyLevelConfig: s.updateHierarchyLevelConfig,
     })),
   );
 
@@ -126,14 +139,38 @@ export const GraphView = memo(function GraphView({
     startConnecting,
     finishConnecting,
     cancelConnecting,
-  } = useGraphView(enableLayers && layerMode && drillAreaId ? drillAreaId : areaId);
+  } = useGraphView(enableLayers && layerMode === 'areas' && drillAreaId ? drillAreaId : areaId);
+
+  // Resolve effective hierarchy level configs (stored or defaults)
+  const effectiveLevelConfigs = hierarchyLevelConfigs ?? DEFAULT_HIERARCHY_LEVEL_CONFIGS;
+
+  // Initialize configs in store if not yet present
+  const initLevelConfigs = useCallback(() => {
+    if (!hierarchyLevelConfigs) {
+      setHierarchyLevelConfigs(DEFAULT_HIERARCHY_LEVEL_CONFIGS);
+    }
+  }, [hierarchyLevelConfigs, setHierarchyLevelConfigs]);
 
   // Compute the actual nodes/edges to display based on layer mode
   const { displayNodes, displayEdges } = (() => {
-    if (!enableLayers || !layerMode) {
-      // Normal content view (possibly filtered by areaId)
+    if (!enableLayers || layerMode === 'contents') {
+      if (showParentChildEdges) {
+        // Use hierarchy-aware graph with depth info and level filtering
+        const hGraph = GraphManager.buildHierarchyGraph(appState, areaId, maxHierarchyLevels, effectiveLevelConfigs);
+        return { displayNodes: hGraph.nodes, displayEdges: hGraph.edges };
+      }
       return { displayNodes: nodes, displayEdges: edges };
     }
+    if (layerMode === 'children') {
+      // Children layer: show only children of the selected parent
+      if (childrenParentId) {
+        const childGraph = GraphManager.buildChildrenGraph(appState, childrenParentId, maxHierarchyLevels, effectiveLevelConfigs);
+        return { displayNodes: childGraph.nodes, displayEdges: childGraph.edges };
+      }
+      // No parent selected → empty graph
+      return { displayNodes: [], displayEdges: [] };
+    }
+    // layerMode === 'areas'
     if (drillAreaId) {
       // Drilled into a specific area → show that area's contents
       return { displayNodes: nodes, displayEdges: edges };
@@ -144,7 +181,7 @@ export const GraphView = memo(function GraphView({
   })();
 
   // Build frame nodes for Cytoscape
-  const frameLevel = (enableLayers && layerMode && !drillAreaId) ? 'area' : 'content';
+  const frameLevel = (enableLayers && layerMode === 'areas' && !drillAreaId) ? 'area' : 'content';
   const frameAreaId = drillAreaId ?? areaId;
   const graphFrames: GraphFrame[] = (appState.graphFrames ?? []).filter((f) => {
     if (f.level !== frameLevel) return false;
@@ -285,7 +322,7 @@ export const GraphView = memo(function GraphView({
       }
       
       // Area node → drill down
-      if (nodeType === 'area' && enableLayersRef.current && layerModeRef.current) {
+      if (nodeType === 'area' && enableLayersRef.current && layerModeRef.current === 'areas') {
         const realAreaId = nodeId.replace('area:', '');
         setDrillAreaIdRef.current(realAreaId);
         return;
@@ -614,7 +651,7 @@ export const GraphView = memo(function GraphView({
       const h = Math.abs(endPt.y - frameStartRef.current.y);
 
       if (w > 30 && h > 30) {
-        const level = (enableLayersRef.current && layerModeRef.current && !drillAreaIdRef.current) ? 'area' : 'content';
+        const level = (enableLayersRef.current && layerModeRef.current === 'areas' && !drillAreaIdRef.current) ? 'area' : 'content';
         const frame: GraphFrame = {
           id: generateId(),
           level: level as 'area' | 'content',
@@ -748,6 +785,18 @@ export const GraphView = memo(function GraphView({
     setEdgeColor(color as typeof GRAPH_COLORS.edgeManual);
     if (selectedEdgeId) {
       updateLink(selectedEdgeId, { color });
+      // Apply directly to Cytoscape for immediate visual feedback on the entire edge
+      const cy = cyRef.current;
+      if (cy) {
+        const cyEdge = cy.$id(selectedEdgeId);
+        if (cyEdge.length) {
+          cyEdge.style({
+            'line-color': color,
+            'target-arrow-color': color,
+            'source-arrow-color': color,
+          });
+        }
+      }
     }
   }, [selectedEdgeId, updateLink]);
 
@@ -821,10 +870,11 @@ export const GraphView = memo(function GraphView({
     resetView();
   }, [resetView]);
 
-  // Layer mode toggle
-  const handleToggleLayerMode = useCallback((enabled: boolean) => {
-    setLayerMode(enabled);
+  // Layer mode change
+  const handleChangeLayerMode = useCallback((mode: GraphLayerMode) => {
+    setLayerMode(mode);
     setDrillAreaId(undefined);
+    setChildrenParentId(undefined);
     setSelectedNodeId(undefined);
     setShowNodeEditor(false);
   }, [setSelectedNodeId]);
@@ -1011,11 +1061,41 @@ export const GraphView = memo(function GraphView({
           onResetView={handleResetView}
           onFit={handleFit}
           layerMode={enableLayers ? layerMode : undefined}
-          onToggleLayerMode={enableLayers ? handleToggleLayerMode : undefined}
+          onChangeLayerMode={enableLayers ? handleChangeLayerMode : undefined}
           drillAreaName={drillAreaId ? areas.find(a => a.id === drillAreaId)?.name : undefined}
           onBackToAreas={drillAreaId ? handleBackToAreas : undefined}
+          showParentChildEdges={showParentChildEdges}
+          onToggleParentChildEdges={enableLayers ? setShowParentChildEdges : undefined}
+          childrenParentId={childrenParentId}
+          onChangeChildrenParent={setChildrenParentId}
+          maxHierarchyLevels={maxHierarchyLevels}
+          onChangeMaxHierarchyLevels={setMaxHierarchyLevels}
+          onOpenLevelConfig={() => { initLevelConfigs(); setShowLevelConfig(true); }}
+          parentContents={
+            (areaId
+              ? appState.contents.filter((c) => c.areaId === areaId)
+              : appState.contents
+            ).map((c) => ({
+              id: c.id,
+              title: c.title,
+              emoji: c.emoji,
+            }))
+          }
         />
       </div>
+
+      {/* Level config panel (below controls) */}
+      {showLevelConfig && (
+        <div style={overlayStyles.levelConfigContainer}>
+          <LevelConfigPanel
+            configs={effectiveLevelConfigs}
+            maxLevels={maxHierarchyLevels}
+            areas={areas}
+            onUpdateConfig={updateHierarchyLevelConfig}
+            onClose={() => setShowLevelConfig(false)}
+          />
+        </div>
+      )}
 
       {/* Node editor panel (top-left) */}
       {showNodeEditor && selectedNodeId && (
@@ -1042,6 +1122,7 @@ export const GraphView = memo(function GraphView({
                 >×</button>
               )}
             </div>
+            <span style={overlayStyles.emojiHint}>paste your emoji</span>
 
             {/* Color picker */}
             <div style={overlayStyles.nodeEditorRow}>
@@ -1253,8 +1334,9 @@ export const GraphView = memo(function GraphView({
         <Island padding={6} style={overlayStyles.statusIsland}>
           <span style={overlayStyles.statusText}>
             {displayNodes.length} nodes · {displayEdges.length} edges
-            {layerMode && !drillAreaId && ' (areas)'}
-            {layerMode && drillAreaId && ` (${areas.find(a => a.id === drillAreaId)?.name || 'area'})`}
+            {layerMode === 'areas' && !drillAreaId && ' (areas)'}
+            {layerMode === 'areas' && drillAreaId && ` (${areas.find(a => a.id === drillAreaId)?.name || 'area'})`}
+            {layerMode === 'children' && childrenParentId && ` (children)`}
           </span>
           {isConnecting && (
             <span style={overlayStyles.connectingStatus}>
@@ -1367,6 +1449,12 @@ const overlayStyles: Record<string, React.CSSProperties> = {
     top: '12px',
     right: '12px',
     zIndex: 10,
+  },
+  levelConfigContainer: {
+    position: 'absolute',
+    top: '12px',
+    right: '200px',
+    zIndex: 11,
   },
   statusContainer: {
     position: 'absolute',
@@ -1493,6 +1581,13 @@ const overlayStyles: Record<string, React.CSSProperties> = {
     fontSize: '14px',
     cursor: 'pointer',
     padding: '0 4px',
+  },
+  emojiHint: {
+    fontSize: '10px',
+    color: '#64748b',
+    marginTop: '-4px',
+    marginBottom: '6px',
+    display: 'block',
   },
   colorGrid: {
     display: 'grid',

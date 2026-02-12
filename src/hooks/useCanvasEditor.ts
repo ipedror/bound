@@ -12,6 +12,7 @@ import type { CanvasState, CanvasHistory } from '../types/canvas';
 import type { Shape, ShapeStyle } from '../types/shape';
 import type { Position } from '../types/base';
 import type { ShapeType } from '../types/enums';
+import { generateId } from '../utils/id';
 
 export interface UseCanvasEditorReturn {
   // State
@@ -52,6 +53,11 @@ export interface UseCanvasEditorReturn {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+
+  // Grouping operations
+  groupSelectedShapes: () => void;
+  ungroupSelectedShapes: () => void;
+  selectGroup: (groupId: string) => void;
 
   // Commit changes to store
   commitToStore: () => void;
@@ -173,13 +179,14 @@ export function useCanvasEditor(
 
   const updateShapePosition = useCallback(
     (shapeId: string, position: Position) => {
-      const newShapes = localShapes.map((s) =>
-        s.id === shapeId ? ShapeFactory.updatePosition(s, position) : s,
+      setLocalShapes((prev) =>
+        prev.map((s) =>
+          s.id === shapeId ? ShapeFactory.updatePosition(s, position) : s,
+        ),
       );
-      setLocalShapes(newShapes);
       // Don't push to history on drag (will push on drag end)
     },
-    [localShapes],
+    [],
   );
 
   const updateShapeStyle = useCallback(
@@ -263,6 +270,46 @@ export function useCanvasEditor(
     pendingCommit.current = true;
   }, [history]);
 
+  // Grouping operations
+  const groupSelectedShapes = useCallback(() => {
+    if (selectedShapeIds.length < 2) return;
+    const gid = generateId();
+    const newShapes = localShapes.map((s) =>
+      selectedShapeIds.includes(s.id) ? { ...s, groupId: gid } : s,
+    );
+    setLocalShapes(newShapes);
+    setHistory((h) => CanvasUndoRedoManager.push(newShapes, h));
+    pendingCommit.current = true;
+  }, [selectedShapeIds, localShapes]);
+
+  const ungroupSelectedShapes = useCallback(() => {
+    if (selectedShapeIds.length === 0) return;
+    // Collect all groupIds of selected shapes
+    const groupIds = new Set(
+      localShapes
+        .filter((s) => selectedShapeIds.includes(s.id) && s.groupId)
+        .map((s) => s.groupId!),
+    );
+    if (groupIds.size === 0) return;
+    // Remove groupId from all shapes in those groups
+    const newShapes = localShapes.map((s) =>
+      s.groupId && groupIds.has(s.groupId)
+        ? { ...s, groupId: undefined }
+        : s,
+    );
+    setLocalShapes(newShapes);
+    setHistory((h) => CanvasUndoRedoManager.push(newShapes, h));
+    pendingCommit.current = true;
+  }, [selectedShapeIds, localShapes]);
+
+  const selectGroup = useCallback(
+    (groupId: string) => {
+      const ids = localShapes.filter((s) => s.groupId === groupId).map((s) => s.id);
+      setSelectedShapeIds(ids);
+    },
+    [localShapes, setSelectedShapeIds],
+  );
+
   // Commit changes to store (debounced externally or called manually)
   const commitToStore = useCallback(() => {
     if (!contentId || !pendingCommit.current) return;
@@ -335,6 +382,9 @@ export function useCanvasEditor(
     redo,
     canUndo,
     canRedo,
+    groupSelectedShapes,
+    ungroupSelectedShapes,
+    selectGroup,
     commitToStore,
   };
 }
