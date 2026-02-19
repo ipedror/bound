@@ -37,9 +37,11 @@ export const Island: React.FC<IslandProps> = ({
 
 const islandStyles: Record<string, React.CSSProperties> = {
   base: {
-    backgroundColor: '#1e293b',
-    borderRadius: '12px',
-    boxShadow: '0 2px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(30, 41, 59, 0.92)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    borderRadius: '10px',
+    boxShadow: '0 4px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06)',
     pointerEvents: 'auto',
   },
 };

@@ -5,6 +5,7 @@
 import type { Shape } from './shape';
 
 export const ToolType = {
+  MOUSE: 'mouse',
   SELECT: 'select',
   RECT: 'rect',
   ELLIPSE: 'ellipse',
@@ -25,6 +26,7 @@ export interface CanvasState {
   readonly fontColor: string;
   readonly opacity: number;
   readonly textMaxWidth: number; // 0 = no limit
+  readonly roughness: number; // 0 = clean, 1+ = hand-drawn
 }
 
 export interface CanvasHistory {

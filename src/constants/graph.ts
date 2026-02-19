@@ -46,16 +46,24 @@ export const CYTOSCAPE_STYLE = [
       'text-valign': 'bottom',
       'text-halign': 'center',
       'text-margin-y': 8,
-      label: 'data(title)',
+      label: 'data(label)',
       color: GRAPH_COLORS.text,
       'font-size': 12,
       'font-family': 'Arial, sans-serif',
       width: 50,
       height: 50,
       shape: 'ellipse',
-      'text-wrap': 'ellipsis',
+      'text-wrap': 'wrap',
       'text-max-width': '100px',
       'z-index': 10,
+    },
+  },
+  {
+    selector: 'node[nodeType = "content"]',
+    style: {
+      'font-size': 'data(labelFontSize)',
+      'text-wrap': 'wrap',
+      'text-max-width': '92px',
     },
   },
   // Node with emoji - show emoji inside via background-image SVG
@@ -220,6 +228,16 @@ export const CYTOSCAPE_STYLE = [
   { selector: 'node[hierarchyDepth = 6]', style: { width: 22, height: 22, 'font-size': 8 } },
   // Hierarchy depth 7
   { selector: 'node[hierarchyDepth = 7]', style: { width: 20, height: 20, 'font-size': 8 } },
+  // Inherited style indicator (dotted amber border)
+  {
+    selector: 'node[isInheritedStyle]',
+    style: {
+      'border-width': 2,
+      'border-color': '#fbbf24',
+      'border-style': 'dotted',
+      'border-opacity': 0.8,
+    },
+  },
 ];
 
 /**

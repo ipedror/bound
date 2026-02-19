@@ -18,6 +18,11 @@ interface Segment {
   x2: number; y2: number;
 }
 
+interface CompactLabel {
+  text: string;
+  fontSize: number;
+}
+
 /**
  * Minimum distance from point (px,py) to a line segment (x1,y1)→(x2,y2)
  */
@@ -44,6 +49,110 @@ function distanceToSegment(px: number, py: number, seg: Segment): number {
  * Factory for creating Cytoscape nodes from Content
  */
 export class NodeFactory {
+  static createCompactTitleLabel(title: string): CompactLabel {
+    const clean = title.trim();
+    if (!clean) return { text: '', fontSize: 12 };
+
+    const len = clean.length;
+    const fontSize = len <= 16 ? 12 : len <= 28 ? 11 : len <= 40 ? 10 : 9;
+    const maxCharsPerLine = fontSize >= 12 ? 11 : fontSize === 11 ? 10 : 9;
+    const maxLines = 4;
+
+    const words = clean.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = '';
+
+    const pushCurrent = () => {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+    };
+
+    for (const word of words) {
+      // Quebra palavras muito longas para não estourar a largura
+      if (word.length > maxCharsPerLine) {
+        pushCurrent();
+        for (let i = 0; i < word.length; i += maxCharsPerLine) {
+          lines.push(word.slice(i, i + maxCharsPerLine));
+          if (lines.length >= maxLines) break;
+        }
+        if (lines.length >= maxLines) break;
+        continue;
+      }
+
+      const next = current ? `${current} ${word}` : word;
+      if (next.length <= maxCharsPerLine) {
+        current = next;
+      } else {
+        pushCurrent();
+        current = word;
+      }
+
+      if (lines.length >= maxLines) break;
+    }
+
+    pushCurrent();
+
+    let resultLines = lines.slice(0, maxLines);
+    if (lines.length > maxLines || resultLines.join(' ').length < clean.length) {
+      const lastIndex = resultLines.length - 1;
+      if (lastIndex >= 0) {
+        const last = resultLines[lastIndex];
+        const trimmedLast = last.length >= maxCharsPerLine
+          ? `${last.slice(0, Math.max(1, maxCharsPerLine - 1))}…`
+          : `${last}…`;
+        resultLines[lastIndex] = trimmedLast;
+      }
+    }
+
+    return {
+      text: resultLines.join('\n'),
+      fontSize,
+    };
+  }
+
+  /**
+   * Resolve inherited emoji/nodeColor by walking the parent chain.
+   * Returns the resolved values and whether inheritance was applied.
+   */
+  static resolveInheritedStyle(
+    content: Content,
+    contentsMap: Map<string, Content>,
+  ): { emoji?: string; nodeColor?: string; isInherited: boolean } {
+    if (!content.inheritParentStyle || !content.parentId) {
+      return { emoji: content.emoji, nodeColor: content.nodeColor, isInherited: false };
+    }
+
+    let resolvedEmoji = content.emoji;
+    let resolvedColor = content.nodeColor;
+    let isInherited = false;
+    const visited = new Set<string>();
+    let current: Content | undefined = content;
+
+    while (current?.parentId && !visited.has(current.id)) {
+      visited.add(current.id);
+      const parent = contentsMap.get(current.parentId);
+      if (!parent) break;
+
+      if (!resolvedEmoji && parent.emoji) {
+        resolvedEmoji = parent.emoji;
+        isInherited = true;
+      }
+      if (!resolvedColor && parent.nodeColor) {
+        resolvedColor = parent.nodeColor;
+        isInherited = true;
+      }
+
+      // Stop if both resolved or parent doesn't inherit further
+      if (resolvedEmoji && resolvedColor) break;
+      if (!parent.inheritParentStyle) break;
+      current = parent;
+    }
+
+    return { emoji: resolvedEmoji, nodeColor: resolvedColor, isInherited };
+  }
+
   /**
    * Create a CytoscapeNode from a Content
    * @param content - The Content (should be closed)
@@ -52,14 +161,24 @@ export class NodeFactory {
    * @param edgeSegments - Edge line segments to avoid
    * @param hierarchyDepth - The depth of this content in the hierarchy (0 = root)
    * @param levelName - Optional name of the hierarchy level
+   * @param contentsMap - Map of all contents (for style inheritance resolution)
    */
-  static createNode(content: Content, color?: string, occupiedPositions?: { x: number; y: number }[], edgeSegments?: Segment[], hierarchyDepth?: number, levelName?: string): CytoscapeNode {
-    const label = content.emoji
-      ? `${content.emoji} ${content.title}`
-      : content.title;
+  static createNode(content: Content, color?: string, occupiedPositions?: { x: number; y: number }[], edgeSegments?: Segment[], hierarchyDepth?: number, levelName?: string, contentsMap?: Map<string, Content>): CytoscapeNode {
+    // Resolve inherited styles if a contentsMap is provided
+    const resolved = contentsMap
+      ? NodeFactory.resolveInheritedStyle(content, contentsMap)
+      : { emoji: content.emoji, nodeColor: content.nodeColor, isInherited: false };
 
-    const emojiImage = content.emoji
-      ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><text x="25" y="25" font-size="26" text-anchor="middle" dominant-baseline="central">${content.emoji}</text></svg>`)}`
+    const emoji = resolved.emoji;
+    const nodeColor = resolved.nodeColor;
+
+    const compact = NodeFactory.createCompactTitleLabel(content.title);
+    const label = emoji
+      ? `${emoji}\n${compact.text}`
+      : compact.text;
+
+    const emojiImage = emoji
+      ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><text x="25" y="25" font-size="26" text-anchor="middle" dominant-baseline="central">${emoji}</text></svg>`)}`
       : undefined;
 
     const position = content.nodePosition ?? NodeFactory.safePosition(occupiedPositions ?? [], edgeSegments);
@@ -70,13 +189,15 @@ export class NodeFactory {
         contentId: content.id,
         areaId: content.areaId,
         label,
-        emoji: content.emoji,
+        labelFontSize: compact.fontSize,
+        emoji,
         emojiImage,
         title: content.title,
-        color: content.nodeColor ?? color ?? GRAPH_COLORS.nodeDefault,
+        color: nodeColor ?? color ?? GRAPH_COLORS.nodeDefault,
         nodeType: 'content',
         hierarchyDepth: hierarchyDepth ?? 0,
         levelName,
+        isInheritedStyle: resolved.isInherited || undefined,
       },
       position,
     };
@@ -180,6 +301,11 @@ export class NodeFactory {
   static createNodes(contents: Content[], color?: string, links?: Link[], depthMap?: Map<string, number>, levelConfigs?: HierarchyLevelConfig[]): CytoscapeNode[] {
     const positions: { x: number; y: number }[] = [];
     const positionMap = new Map<string, { x: number; y: number }>();
+    // Build contentsMap for style inheritance resolution
+    const contentsMap = new Map<string, Content>();
+    for (const c of contents) {
+      contentsMap.set(c.id, c);
+    }
     // First pass: collect known positions
     for (const c of contents) {
       if (c.nodePosition) {
@@ -213,7 +339,7 @@ export class NodeFactory {
           levelName = cfg.name;
         }
       }
-      const node = NodeFactory.createNode(content, nodeColor, positions, segments, depth, levelName);
+      const node = NodeFactory.createNode(content, nodeColor, positions, segments, depth, levelName, contentsMap);
       if (node.position) {
         positions.push(node.position);
         positionMap.set(content.id, node.position);

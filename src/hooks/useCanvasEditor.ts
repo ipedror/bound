@@ -28,6 +28,7 @@ export interface UseCanvasEditorReturn {
   setStrokeColor: (color: string) => void;
   setStrokeWidth: (width: number) => void;
   setOpacity: (opacity: number) => void;
+  setRoughness: (roughness: number) => void;
   setFontFamily: (family: string) => void;
   setFontSize: (size: number) => void;
   setTextMaxWidth: (maxWidth: number) => void;
@@ -124,6 +125,10 @@ export function useCanvasEditor(
     setCanvasState((prev) => ({ ...prev, opacity }));
   }, []);
 
+  const setRoughness = useCallback((roughness: number) => {
+    setCanvasState((prev) => ({ ...prev, roughness }));
+  }, []);
+
   const setFontFamily = useCallback((fontFamily: string) => {
     setCanvasState((prev) => ({ ...prev, fontFamily }));
   }, []);
@@ -210,7 +215,7 @@ export function useCanvasEditor(
 
   // Drawing operations
   const startDrawing = useCallback((position: Position) => {
-    if (canvasState.tool === ToolType.SELECT) return;
+    if (canvasState.tool === ToolType.SELECT || canvasState.tool === ToolType.MOUSE) return;
     setIsDrawing(true);
     setDrawStartPos(position);
   }, [canvasState.tool]);
@@ -226,7 +231,7 @@ export function useCanvasEditor(
       if (!isDrawing || !drawStartPos) return;
 
       const tool = canvasState.tool;
-      if (tool === ToolType.SELECT || tool === ToolType.ERASER) {
+      if (tool === ToolType.SELECT || tool === ToolType.MOUSE || tool === ToolType.ERASER) {
         setIsDrawing(false);
         setDrawStartPos(null);
         return;
@@ -363,6 +368,7 @@ export function useCanvasEditor(
     setStrokeColor,
     setStrokeWidth,
     setOpacity,
+    setRoughness,
     setFontFamily,
     setFontSize,
     setTextMaxWidth,

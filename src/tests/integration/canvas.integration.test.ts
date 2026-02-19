@@ -431,6 +431,7 @@ describe('Canvas Editor Integration', () => {
       expect(savedShape?.style.stroke).toBe('#00ff00');
       expect(savedShape?.style.strokeWidth).toBe(5);
       expect(savedShape?.style.opacity).toBe(0.7);
+      expect(savedShape?.style.roughness).toBe(0);
 
       // Update style
       updateShapeInContent(contentId, shape.id, {

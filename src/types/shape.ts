@@ -11,6 +11,7 @@ export interface ShapeStyle {
   readonly strokeWidth?: number;
   readonly fontStyle?: FontStyle;
   readonly opacity?: number;
+  readonly roughness?: number; // 0 = clean, 1+ = hand-drawn
 }
 
 export interface Shape {

@@ -16,11 +16,14 @@ export interface Content {
     readonly shapes: Shape[];
   };
   readonly properties: Property[];
+  readonly tags?: string[];
   readonly emoji?: string;
   readonly nodeColor?: string;
   readonly nodePosition?: Position;
   /** ID of the parent content (for parent-child hierarchy) */
   readonly parentId?: string;
+  /** Whether this content inherits emoji/nodeColor from its parent */
+  readonly inheritParentStyle?: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

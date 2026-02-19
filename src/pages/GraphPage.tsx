@@ -1,12 +1,13 @@
 // ============================================================
 // GraphPage - Full-screen Excalidraw-style graph page
-// Auto split-view: click node → graph left, content right
+// Click node → floating popup over graph; split-view on demand
 // ============================================================
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GraphView } from '../components/GraphView';
 import { CanvasEditor } from '../components/CanvasEditor';
+import { ContentPopup } from '../components/ContentPopup';
 import { Island } from '../components/Island';
 import { useAppStore } from '../store/appStore';
 import { useShallow } from 'zustand/shallow';
@@ -14,6 +15,7 @@ import { LinkType } from '../types/enums';
 
 export default function GraphPage() {
   const [selectedContentId, setSelectedContentId] = useState<string | undefined>();
+  const [isSplitView, setIsSplitView] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [parentOpen, setParentOpen] = useState(false);
@@ -122,11 +124,13 @@ export default function GraphPage() {
   }, []);
 
   const handleBackgroundClick = useCallback(() => {
-    setSelectedContentId(undefined);
+    if (!isSplitView) {
+      setSelectedContentId(undefined);
+    }
     setLinksOpen(false);
     setShowLinkModal(false);
     setParentOpen(false);
-  }, []);
+  }, [isSplitView]);
 
   const handleCreateLink = useCallback(
     (targetId: string) => {
@@ -137,7 +141,13 @@ export default function GraphPage() {
     [selectedContentId, createLink],
   );
 
-  const isSplit = !!selectedContentId;
+  const handlePopupClose = useCallback(() => {
+    setSelectedContentId(undefined);
+  }, []);
+
+  const handleSwitchToSplit = useCallback(() => {
+    setIsSplitView(true);
+  }, []);
 
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -164,11 +174,16 @@ export default function GraphPage() {
     document.addEventListener('mouseup', onMouseUp);
   }, [splitRatio]);
 
+  // If in popup mode (not split), show popup over graph
+  const showPopup = !!selectedContentId && !isSplitView;
+  // If in split mode
+  const showSplit = !!selectedContentId && isSplitView;
+
   return (
     <div style={styles.container}>
       <div style={styles.splitContainer} ref={splitContainerRef}>
         {/* Left: Graph */}
-        <div style={{ ...styles.splitPanel, flex: isSplit ? `0 0 ${splitRatio * 100}%` : 1 }}>
+        <div style={{ ...styles.splitPanel, flex: showSplit ? `0 0 ${splitRatio * 100}%` : 1 }}>
           <GraphView
             height="100%"
             width="100%"
@@ -176,10 +191,19 @@ export default function GraphPage() {
             onBackgroundClick={handleBackgroundClick}
             enableLayers
           />
+
+          {/* Floating popup (over graph) */}
+          {showPopup && selectedContentId && (
+            <ContentPopup
+              contentId={selectedContentId}
+              onClose={handlePopupClose}
+              onSplitView={handleSwitchToSplit}
+            />
+          )}
         </div>
 
-        {/* Right: Content canvas (only when a node is selected) */}
-        {isSplit && (
+        {/* Right: Content canvas (only when split view is active) */}
+        {showSplit && (
           <>
             <div
               style={styles.splitDivider}
@@ -188,7 +212,7 @@ export default function GraphPage() {
               <div style={styles.splitDividerHandle} />
             </div>
             <div style={{ ...styles.splitPanel, flex: `0 0 ${(1 - splitRatio) * 100}%` }}>
-              <CanvasEditor contentId={selectedContentId} />
+              <CanvasEditor contentId={selectedContentId!} />
 
               {/* Content title bar */}
               {content && (
@@ -214,6 +238,17 @@ export default function GraphPage() {
                         {content.title}
                       </span>
                     )}
+                    {/* Close split view (back to popup) */}
+                    <button
+                      style={styles.openBtn}
+                      onClick={() => setIsSplitView(false)}
+                      title="Close split view"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <line x1="12" y1="3" x2="12" y2="21" />
+                      </svg>
+                    </button>
                     <button
                       style={styles.openBtn}
                       onClick={() => navigate(`/content/${content.id}`)}
@@ -348,6 +383,21 @@ export default function GraphPage() {
                       {/* Children list */}
                       <div style={{ ...styles.panelHeader, marginTop: '12px' }}>
                         <h3 style={styles.panelTitle}>Children</h3>
+                        {childContents.length > 0 && content && (content.emoji || content.nodeColor) && (
+                          <button
+                            style={styles.applyAllBtn}
+                            onClick={() => {
+                              childContents.forEach((child) => {
+                                if (!child.inheritParentStyle) {
+                                  updateContent(child.id, { inheritParentStyle: true });
+                                }
+                              });
+                            }}
+                            title="Inherit style on all children"
+                          >
+                            Apply to all
+                          </button>
+                        )}
                       </div>
                       {childContents.length === 0 ? (
                         <p style={styles.emptyText}>No children</p>
@@ -358,7 +408,22 @@ export default function GraphPage() {
                               <span style={styles.linkName} onClick={() => { setSelectedContentId(child.id); setParentOpen(false); }}>
                                 {child.emoji ? `${child.emoji} ` : ''}{child.title}
                               </span>
-                              <button style={styles.removeBtn} onClick={() => updateContent(child.id, { parentId: undefined })} title="Remove from parent">×</button>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {child.inheritParentStyle && (
+                                  <span style={styles.inheritBadge} title="Inheriting parent style">⬇</span>
+                                )}
+                                <button
+                                  style={{
+                                    ...styles.inheritToggleBtn,
+                                    ...(child.inheritParentStyle ? styles.inheritToggleBtnActive : {}),
+                                  }}
+                                  onClick={() => updateContent(child.id, { inheritParentStyle: !child.inheritParentStyle })}
+                                  title={child.inheritParentStyle ? 'Disable style inheritance' : 'Inherit parent style'}
+                                >
+                                  {child.inheritParentStyle ? '🔗' : '🔗'}
+                                </button>
+                                <button style={styles.removeBtn} onClick={() => updateContent(child.id, { parentId: undefined })} title="Remove from parent">×</button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -447,7 +512,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    maxWidth: '280px',
+    maxWidth: '320px',
   },
   contentEmoji: {
     fontSize: '14px',
@@ -625,5 +690,41 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '12px',
     outline: 'none',
     cursor: 'pointer',
+  },
+  applyAllBtn: {
+    padding: '2px 8px',
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+    color: '#fbbf24',
+    border: '1px solid rgba(251, 191, 36, 0.3)',
+    borderRadius: '6px',
+    fontSize: '10px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap' as const,
+  },
+  inheritToggleBtn: {
+    width: '22px',
+    height: '22px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(0,0,0,0.2)',
+    border: '1px solid #475569',
+    borderRadius: '6px',
+    fontSize: '10px',
+    cursor: 'pointer',
+    padding: 0,
+    opacity: 0.4,
+    transition: 'all 0.15s ease',
+  },
+  inheritToggleBtnActive: {
+    opacity: 1,
+    borderColor: '#fbbf24',
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+  },
+  inheritBadge: {
+    fontSize: '9px',
+    color: '#fbbf24',
+    lineHeight: 1,
   },
 };

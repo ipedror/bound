@@ -7,6 +7,7 @@ import type { Position, Dimension } from '../../types/base';
 import type { CanvasState } from '../../types/canvas';
 import { ShapeType } from '../../types/enums';
 import { generateId } from '../id';
+import { HAND_DRAWN_FONT } from '../../constants/canvas';
 
 /**
  * Factory for creating shapes with consistent defaults
@@ -163,11 +164,12 @@ export class ShapeFactory {
         stroke: state.strokeColor,
         strokeWidth: state.strokeWidth,
         fontStyle: {
-          fontFamily: state.fontFamily,
+          fontFamily: state.roughness > 0 ? HAND_DRAWN_FONT : state.fontFamily,
           fontSize: state.fontSize,
           color: state.fontColor,
         },
         opacity: state.opacity,
+        roughness: state.roughness,
       },
       text,
       ...(maxWidth > 0 ? { maxWidth } : {}),
@@ -288,6 +290,7 @@ export class ShapeFactory {
       stroke: state.strokeColor,
       strokeWidth: state.strokeWidth,
       opacity: state.opacity,
+      roughness: state.roughness,
     };
   }
 }

@@ -12,7 +12,8 @@
     "type-check": "tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "deploy": "npm run build && node scripts/deploy.mjs"
   },
   "dependencies": {
     "cytoscape": "^3.33.1",
@@ -25,6 +26,7 @@
     "react-dom": "^19.2.0",
     "react-konva": "^19.2.2",
     "react-router-dom": "^7.13.0",
+    "roughjs": "^4.6.6",
     "zustand": "^5.0.11"
   },
   "devDependencies": {

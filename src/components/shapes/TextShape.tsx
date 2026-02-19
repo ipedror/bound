@@ -8,6 +8,8 @@ import type Konva from 'konva';
 import type { Shape } from '../../types/shape';
 import type { Position } from '../../types/base';
 import { SELECTION_COLOR, MIN_SHAPE_SIZE } from '../../constants/canvas';
+import { HAND_DRAWN_FONT } from '../../constants/canvas';
+import { isHandDrawn } from '../../utils/canvas/roughDraw';
 
 interface TextShapeProps {
   shape: Shape;
@@ -96,7 +98,9 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
       textarea.style.width = `${shape.maxWidth && shape.maxWidth > 0 ? shape.maxWidth : textNode.width()}px`;
       textarea.style.height = `${textNode.height() + 20}px`;
       textarea.style.fontSize = `${shape.style.fontStyle?.fontSize ?? 16}px`;
-      textarea.style.fontFamily = shape.style.fontStyle?.fontFamily ?? 'Arial';
+      textarea.style.fontFamily = handDrawn
+        ? HAND_DRAWN_FONT
+        : (shape.style.fontStyle?.fontFamily ?? 'Arial');
       textarea.style.color = shape.style.fill ?? '#fff';
       textarea.style.background = 'transparent';
       textarea.style.border = `2px solid ${SELECTION_COLOR}`;
@@ -135,6 +139,10 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
     }, [shape, onUpdate, onDoubleClick]);
 
     const fontStyle = shape.style.fontStyle;
+    const handDrawn = isHandDrawn(shape.style.roughness);
+    const effectiveFontFamily = handDrawn
+      ? HAND_DRAWN_FONT
+      : (fontStyle?.fontFamily ?? 'Arial');
 
     return (
       <Group>
@@ -160,7 +168,7 @@ export const TextShape: React.FC<TextShapeProps> = React.memo(
           text={shape.text ?? 'Text'}
           fill={shape.style.fill ?? fontStyle?.color ?? '#f1f1f1'}
           fontSize={fontStyle?.fontSize ?? 16}
-          fontFamily={fontStyle?.fontFamily ?? 'Arial'}
+          fontFamily={effectiveFontFamily}
           opacity={shape.style.opacity ?? 1}
           draggable={isDraggable}
           onClick={onSelect}

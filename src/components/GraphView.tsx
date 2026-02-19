@@ -2,7 +2,7 @@
 // GraphView - Excalidraw-style graph visualization with Cytoscape.js
 // ============================================================
 
-import { useRef, useEffect, useCallback, useState, memo } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo, memo } from 'react';
 import cytoscape, { type Core, type EventObject, type LayoutOptions } from 'cytoscape';
 // @ts-expect-error - cytoscape-cose-bilkent has no type declarations
 import coseBilkent from 'cytoscape-cose-bilkent';
@@ -15,10 +15,12 @@ import { Island } from './Island';
 import { CYTOSCAPE_STYLE, LAYOUT_OPTIONS, GRAPH_COLORS, DEFAULT_HIERARCHY_LEVEL_CONFIGS } from '../constants/graph';
 import { GraphManager } from '../managers/GraphManager';
 import { LevelConfigPanel } from './LevelConfigPanel';
-import type { LayoutName, GraphFrame } from '../types/graph';
+import { FrameAnnotationsOverlay } from './FrameAnnotationsOverlay';
+import type { LayoutName, GraphFrame, GraphFrameText, GraphFrameShape } from '../types/graph';
 import type { CytoscapeNode } from '../types/graph';
 import { LinkType, EdgeLineStyle, EdgeArrowMode } from '../types/enums';
 import { generateId } from '../utils/id';
+import { getTagColor } from '../utils/tagColors';
 
 // Register cose-bilkent layout extension
 cytoscape.use(coseBilkent);
@@ -84,6 +86,11 @@ export const GraphView = memo(function GraphView({
   // Level config panel visibility
   const [showLevelConfig, setShowLevelConfig] = useState(false);
 
+  // Tag filter state
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [showTagFilter, setShowTagFilter] = useState(false);
+  const tagFilterRef = useRef<HTMLDivElement>(null);
+
   // Frame drawing state
   const [isDrawingFrame, setIsDrawingFrame] = useState(false);
   const frameStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -102,10 +109,20 @@ export const GraphView = memo(function GraphView({
   const [edgeLineStyle, setEdgeLineStyle] = useState<string>('solid');
   const [edgeArrowMode, setEdgeArrowMode] = useState<string>('forward');
 
+  // Context menu state (right-click on empty space)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; modelX: number; modelY: number } | null>(null);
+  // Create node modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createMode, setCreateMode] = useState<'area' | 'content'>('content');
+  const [createName, setCreateName] = useState('');
+  const [createAreaId, setCreateAreaId] = useState<string>('');
+  const [createModelPos, setCreateModelPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
   const {
     updateContent, allContents, createLink, deleteLink, updateLink, state: appState,
     areas, addGraphFrame, updateGraphFrame, deleteGraphFrame,
     updateAreaNodePosition, hierarchyLevelConfigs, setHierarchyLevelConfigs, updateHierarchyLevelConfig,
+    createArea, createContent, updateNodePosition: storeUpdateNodePosition,
   } = useAppStore(
     useShallow((s) => ({
       updateContent: s.updateContent,
@@ -122,6 +139,9 @@ export const GraphView = memo(function GraphView({
       hierarchyLevelConfigs: s.state.hierarchyLevelConfigs,
       setHierarchyLevelConfigs: s.setHierarchyLevelConfigs,
       updateHierarchyLevelConfig: s.updateHierarchyLevelConfig,
+      createArea: s.createArea,
+      createContent: s.createContent,
+      updateNodePosition: s.updateNodePosition,
     })),
   );
 
@@ -207,8 +227,38 @@ export const GraphView = memo(function GraphView({
     },
   }));
 
-  const allDisplayNodes = [...frameNodes, ...displayNodes];
-  const allDisplayEdges = displayEdges;
+  // Compute all available tags from visible content nodes
+  const allVisibleTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    const displayNodeIds = new Set(displayNodes.map((n) => n.data.contentId));
+    allContents
+      .filter((c) => displayNodeIds.has(c.id))
+      .forEach((c) => {
+        (c.tags ?? []).forEach((t) => tagSet.add(t));
+      });
+    return Array.from(tagSet).sort();
+  }, [allContents, displayNodes]);
+
+  // Apply tag filter to nodes and edges
+  const tagFilteredNodes = selectedTags.length > 0
+    ? displayNodes.filter((node) => {
+        if (node.data.nodeType === 'frame') return true;
+        const content = allContents.find((c) => c.id === node.data.contentId);
+        if (!content) return false;
+        const contentTags = content.tags ?? [];
+        return selectedTags.every((tag) => contentTags.includes(tag));
+      })
+    : displayNodes;
+
+  const tagFilteredNodeIds = new Set(tagFilteredNodes.map((n) => n.data.id));
+  const tagFilteredEdges = selectedTags.length > 0
+    ? displayEdges.filter((e) =>
+        tagFilteredNodeIds.has(e.data.source) && tagFilteredNodeIds.has(e.data.target),
+      )
+    : displayEdges;
+
+  const allDisplayNodes = [...frameNodes, ...tagFilteredNodes];
+  const allDisplayEdges = tagFilteredEdges;
 
   // Refs to avoid stale closures in Cytoscape event handlers
   const activeToolRef = useRef(activeTool);
@@ -484,10 +534,32 @@ export const GraphView = memo(function GraphView({
         setSelectedEdgeIdRef.current(undefined);
         setShowNodeEditor(false);
         setShowEdgeEditor(false);
+        setContextMenu(null);
         onBackgroundClickRef.current?.();
         if (isConnectingRef.current) {
           cancelConnectingRef.current();
         }
+      }
+    });
+
+    // Right-click on background - show context menu
+    cy.on('cxttap', (evt: EventObject) => {
+      if (evt.target === cy) {
+        const renderedPos = evt.renderedPosition ?? evt.position;
+        const container = containerRef.current;
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        // Convert rendered position to model position
+        const pan = cy.pan();
+        const zoom = cy.zoom();
+        const modelX = (renderedPos.x - pan.x) / zoom;
+        const modelY = (renderedPos.y - pan.y) / zoom;
+        setContextMenu({
+          x: renderedPos.x + rect.left,
+          y: renderedPos.y + rect.top,
+          modelX,
+          modelY,
+        });
       }
     });
 
@@ -907,6 +979,71 @@ export const GraphView = memo(function GraphView({
     setEditingFrameId(undefined);
   }, [editingFrameId, deleteGraphFrame]);
 
+  // Frame annotation handlers
+  const handleAddFrameText = useCallback(() => {
+    if (!editingFrameId) return;
+    const frame = graphFrames.find((f) => f.id === editingFrameId);
+    if (!frame) return;
+    const newText: GraphFrameText = {
+      id: generateId(),
+      text: 'Text',
+      x: frame.width / 2 - 20,
+      y: frame.height / 2,
+      color: '#e2e8f0',
+      fontSize: 14,
+    };
+    const existing = frame.texts ?? [];
+    updateGraphFrame(editingFrameId, { texts: [...existing, newText] });
+  }, [editingFrameId, graphFrames, updateGraphFrame]);
+
+  const handleAddFrameShape = useCallback((type: 'line' | 'arrow' | 'rect') => {
+    if (!editingFrameId) return;
+    const frame = graphFrames.find((f) => f.id === editingFrameId);
+    if (!frame) return;
+    const cx = frame.width / 2;
+    const cy = frame.height / 2;
+    const newShape: GraphFrameShape = {
+      id: generateId(),
+      type,
+      startX: cx - 40,
+      startY: cy - (type === 'rect' ? 20 : 0),
+      endX: cx + 40,
+      endY: cy + (type === 'rect' ? 20 : 0),
+      color: '#94a3b8',
+      strokeWidth: 2,
+    };
+    const existing = frame.shapes ?? [];
+    updateGraphFrame(editingFrameId, { shapes: [...existing, newShape] });
+  }, [editingFrameId, graphFrames, updateGraphFrame]);
+
+  const handleUpdateFrameText = useCallback((frameId: string, textId: string, updates: Partial<GraphFrameText>) => {
+    const frame = graphFrames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const texts = (frame.texts ?? []).map((t) => t.id === textId ? { ...t, ...updates } : t);
+    updateGraphFrame(frameId, { texts });
+  }, [graphFrames, updateGraphFrame]);
+
+  const handleDeleteFrameText = useCallback((frameId: string, textId: string) => {
+    const frame = graphFrames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const texts = (frame.texts ?? []).filter((t) => t.id !== textId);
+    updateGraphFrame(frameId, { texts });
+  }, [graphFrames, updateGraphFrame]);
+
+  const handleUpdateFrameShape = useCallback((frameId: string, shapeId: string, updates: Partial<GraphFrameShape>) => {
+    const frame = graphFrames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const shapes = (frame.shapes ?? []).map((s) => s.id === shapeId ? { ...s, ...updates } : s);
+    updateGraphFrame(frameId, { shapes });
+  }, [graphFrames, updateGraphFrame]);
+
+  const handleDeleteFrameShape = useCallback((frameId: string, shapeId: string) => {
+    const frame = graphFrames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const shapes = (frame.shapes ?? []).filter((s) => s.id !== shapeId);
+    updateGraphFrame(frameId, { shapes });
+  }, [graphFrames, updateGraphFrame]);
+
   // Escape key to cancel connecting or switch to select
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -938,6 +1075,42 @@ export const GraphView = memo(function GraphView({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isConnecting, cancelConnecting, showFrameEditor, showEdgeEditor, selectedEdgeId, showNodeEditor, handleDeleteEdge]);
 
+  // Context menu: open create modal
+  const handleContextMenuCreate = useCallback((mode: 'area' | 'content') => {
+    if (!contextMenu) return;
+    setCreateMode(mode);
+    setCreateName('');
+    setCreateAreaId(areas.length > 0 ? areas[0].id : '');
+    setCreateModelPos({ x: contextMenu.modelX, y: contextMenu.modelY });
+    setShowCreateModal(true);
+    setContextMenu(null);
+  }, [contextMenu, areas]);
+
+  // Handle creating area or content from modal
+  const handleCreateFromModal = useCallback(() => {
+    if (!createName.trim()) return;
+    if (createMode === 'area') {
+      const areaId = createArea(createName.trim());
+      // Set area node position to where user right-clicked
+      updateAreaNodePosition(areaId, createModelPos.x, createModelPos.y);
+    } else {
+      if (!createAreaId) return;
+      const contentId = createContent(createAreaId, createName.trim());
+      // Set content node position to where user right-clicked
+      storeUpdateNodePosition(contentId, createModelPos.x, createModelPos.y);
+    }
+    setShowCreateModal(false);
+    setCreateName('');
+  }, [createName, createMode, createAreaId, createModelPos, createArea, createContent, updateAreaNodePosition, storeUpdateNodePosition]);
+
+  // Close context menu on click anywhere
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = () => setContextMenu(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, [contextMenu]);
+
   // Cursor based on tool
   const getCursor = () => {
     if (activeTool === 'hand') return 'grab';
@@ -966,7 +1139,20 @@ export const GraphView = memo(function GraphView({
           width: '100%',
           height: '100%',
         }}
+        onContextMenu={(e) => e.preventDefault()}
       />
+
+      {/* Frame annotations overlay (texts & shapes inside frames) */}
+      {graphFrames.length > 0 && (
+        <FrameAnnotationsOverlay
+          cyRef={cyRef}
+          frames={graphFrames}
+          onUpdateText={handleUpdateFrameText}
+          onDeleteText={handleDeleteFrameText}
+          onUpdateShape={handleUpdateFrameShape}
+          onDeleteShape={handleDeleteFrameShape}
+        />
+      )}
 
       {/* Frame drawing preview */}
       {isDrawingFrame && framePreviewStart && framePreviewCurrent && (
@@ -1318,6 +1504,79 @@ export const GraphView = memo(function GraphView({
               <span style={overlayStyles.colorHex}>{frameBorderColor}</span>
             </div>
 
+            {/* Annotations section */}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '8px', paddingTop: '8px' }}>
+              <div style={overlayStyles.nodeEditorRow}>
+                <label style={overlayStyles.nodeEditorLabel}>Annotate</label>
+              </div>
+              <div style={overlayStyles.edgeOptionRow}>
+                <button
+                  style={overlayStyles.edgeOptionBtn}
+                  onClick={handleAddFrameText}
+                  title="Add text annotation"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="4 7 4 4 20 4 20 7" />
+                    <line x1="9" y1="20" x2="15" y2="20" />
+                    <line x1="12" y1="4" x2="12" y2="20" />
+                  </svg>
+                </button>
+                <button
+                  style={overlayStyles.edgeOptionBtn}
+                  onClick={() => handleAddFrameShape('line')}
+                  title="Add line"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="4" y1="20" x2="20" y2="4" />
+                  </svg>
+                </button>
+                <button
+                  style={overlayStyles.edgeOptionBtn}
+                  onClick={() => handleAddFrameShape('arrow')}
+                  title="Add arrow"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </button>
+                <button
+                  style={overlayStyles.edgeOptionBtn}
+                  onClick={() => handleAddFrameShape('rect')}
+                  title="Add rectangle"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* List existing annotations */}
+              {(() => {
+                const frame = graphFrames.find((f) => f.id === editingFrameId);
+                if (!frame) return null;
+                const texts = frame.texts ?? [];
+                const shapes = frame.shapes ?? [];
+                if (texts.length === 0 && shapes.length === 0) return null;
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '4px' }}>
+                    {texts.map((t) => (
+                      <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#94a3b8', padding: '2px 4px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '120px' }}>T: {t.text}</span>
+                        <button style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '12px', cursor: 'pointer', padding: '0 2px' }} onClick={() => handleDeleteFrameText(editingFrameId!, t.id)}>×</button>
+                      </div>
+                    ))}
+                    {shapes.map((s) => (
+                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#94a3b8', padding: '2px 4px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+                        <span>{s.type === 'line' ? '— Line' : s.type === 'arrow' ? '→ Arrow' : '▭ Rect'}</span>
+                        <button style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '12px', cursor: 'pointer', padding: '0 2px' }} onClick={() => handleDeleteFrameShape(editingFrameId!, s.id)}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
             {/* Delete button */}
             <button
               style={overlayStyles.frameDeleteBtn}
@@ -1402,6 +1661,220 @@ export const GraphView = memo(function GraphView({
           </button>
         </Island>
       </div>
+
+      {/* Bottom-right: Tag filter */}
+      {allVisibleTags.length > 0 && (
+        <div ref={tagFilterRef} style={overlayStyles.tagFilterContainer}>
+          <Island padding={4}>
+            <button
+              style={{
+                ...overlayStyles.tagFilterBtn,
+                ...(selectedTags.length > 0 || showTagFilter ? overlayStyles.toolButtonActive : {}),
+              }}
+              onClick={() => setShowTagFilter(!showTagFilter)}
+              title="Filter by tags"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                <line x1="7" y1="7" x2="7.01" y2="7" />
+              </svg>
+              <span style={{ fontSize: '12px', fontWeight: 500 }}>Tags</span>
+              {selectedTags.length > 0 && (
+                <span style={overlayStyles.tagBadge}>{selectedTags.length}</span>
+              )}
+            </button>
+          </Island>
+
+          {showTagFilter && (
+            <Island padding={12} style={overlayStyles.tagFilterDropdown}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={overlayStyles.nodeEditorLabel}>Filter by tag</span>
+                {selectedTags.length > 0 && (
+                  <button
+                    style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '11px', cursor: 'pointer', padding: '2px 4px' }}
+                    onClick={() => setSelectedTags([])}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {allVisibleTags.map((tag) => {
+                  const color = getTagColor(tag);
+                  const isSelected = selectedTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        border: `1px solid ${isSelected ? color.border : '#334155'}`,
+                        backgroundColor: isSelected ? color.bg : 'transparent',
+                        color: isSelected ? color.text : '#94a3b8',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onClick={() => {
+                        setSelectedTags((prev) =>
+                          prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+                        );
+                      }}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </Island>
+          )}
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 1000,
+            backgroundColor: '#1e293b',
+            border: '1px solid #334155',
+            borderRadius: '10px',
+            padding: '4px',
+            minWidth: '180px',
+            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            style={overlayStyles.contextMenuItem}
+            onClick={() => handleContextMenuCreate('content')}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.12)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="16" />
+              <line x1="8" y1="12" x2="16" y2="12" />
+            </svg>
+            <span>Add Content</span>
+          </button>
+          <button
+            style={overlayStyles.contextMenuItem}
+            onClick={() => handleContextMenuCreate('area')}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(167, 139, 250, 0.12)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3" />
+              <line x1="12" y1="8" x2="12" y2="16" />
+              <line x1="8" y1="12" x2="16" y2="12" />
+            </svg>
+            <span>Add Area</span>
+          </button>
+        </div>
+      )}
+
+      {/* Create Area/Content modal */}
+      {showCreateModal && (
+        <div
+          style={overlayStyles.createModalOverlay}
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            style={overlayStyles.createModal}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#f1f1f1', margin: '0 0 20px 0' }}>
+              {createMode === 'area' ? 'New Area' : 'New Content'}
+            </h2>
+
+            {/* Name input */}
+            <label style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px', display: 'block', fontWeight: 500 }}>
+              {createMode === 'area' ? 'Area name' : 'Content name'}
+            </label>
+            <input
+              type="text"
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateFromModal()}
+              placeholder={createMode === 'area' ? 'Enter area name...' : 'Enter content name...'}
+              style={overlayStyles.createModalInput}
+              autoFocus
+            />
+
+            {/* Area selector (only for content) */}
+            {createMode === 'content' && (
+              <>
+                <label style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px', marginTop: '14px', display: 'block', fontWeight: 500 }}>
+                  Area
+                </label>
+                {areas.length === 0 ? (
+                  <p style={{ fontSize: '13px', color: '#ef4444', margin: '0 0 8px 0' }}>
+                    No areas exist. Create an area first.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                    {areas.map((a) => (
+                      <button
+                        key={a.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '10px 12px',
+                          backgroundColor: createAreaId === a.id ? 'rgba(56, 189, 248, 0.15)' : 'rgba(0,0,0,0.2)',
+                          border: createAreaId === a.id ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid transparent',
+                          borderRadius: '8px',
+                          color: createAreaId === a.id ? '#38bdf8' : '#e2e8f0',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: createAreaId === a.id ? 600 : 400,
+                          textAlign: 'left' as const,
+                          transition: 'all 0.15s ease',
+                        }}
+                        onClick={() => setCreateAreaId(a.id)}
+                      >
+                        {a.emoji && <span>{a.emoji}</span>}
+                        <span>{a.name}</span>
+                        {createAreaId === a.id && (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 'auto' }}>
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+              <button
+                style={overlayStyles.createModalCancelBtn}
+                onClick={() => setShowCreateModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                style={{
+                  ...overlayStyles.createModalCreateBtn,
+                  opacity: !createName.trim() || (createMode === 'content' && (!createAreaId || areas.length === 0)) ? 0.4 : 1,
+                }}
+                onClick={handleCreateFromModal}
+                disabled={!createName.trim() || (createMode === 'content' && (!createAreaId || areas.length === 0))}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -1668,5 +2141,117 @@ const overlayStyles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(56, 189, 248, 0.2)',
     borderColor: 'rgba(56, 189, 248, 0.5)',
     color: '#38bdf8',
+  },
+  tagFilterContainer: {
+    position: 'absolute',
+    bottom: '12px',
+    right: '12px',
+    zIndex: 10,
+  },
+  tagFilterBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 12px',
+    backgroundColor: 'transparent',
+    border: 'none',
+    borderRadius: '8px',
+    color: '#94a3b8',
+    fontSize: '13px',
+    cursor: 'pointer',
+    fontWeight: 500,
+    whiteSpace: 'nowrap' as const,
+    transition: 'all 0.15s ease',
+  },
+  tagBadge: {
+    backgroundColor: '#38bdf8',
+    color: '#0f172a',
+    borderRadius: '10px',
+    padding: '0 6px',
+    fontSize: '10px',
+    fontWeight: 700,
+    minWidth: '16px',
+    textAlign: 'center' as const,
+    lineHeight: '16px',
+  },
+  tagFilterDropdown: {
+    position: 'absolute',
+    bottom: 'calc(100% + 8px)',
+    right: 0,
+    minWidth: '240px',
+    maxWidth: '320px',
+  },
+  // Context menu
+  contextMenuItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    width: '100%',
+    padding: '10px 14px',
+    backgroundColor: 'transparent',
+    border: 'none',
+    borderRadius: '8px',
+    color: '#e2e8f0',
+    fontSize: '13px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    textAlign: 'left' as const,
+    transition: 'background-color 0.12s ease',
+  },
+  // Create modal
+  createModalOverlay: {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  },
+  createModal: {
+    backgroundColor: '#1e293b',
+    borderRadius: '14px',
+    padding: '28px',
+    width: '380px',
+    maxWidth: '90%',
+    maxHeight: '80vh',
+    overflow: 'auto',
+    border: '1px solid #334155',
+    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+  },
+  createModalInput: {
+    width: '100%',
+    padding: '10px 14px',
+    backgroundColor: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    color: '#f1f1f1',
+    fontSize: '14px',
+    boxSizing: 'border-box' as const,
+    outline: 'none',
+  },
+  createModalCancelBtn: {
+    padding: '8px 18px',
+    backgroundColor: 'transparent',
+    color: '#94a3b8',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    fontSize: '13px',
+    cursor: 'pointer',
+    fontWeight: 500,
+  },
+  createModalCreateBtn: {
+    padding: '8px 22px',
+    backgroundColor: '#38bdf8',
+    color: '#0f172a',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'opacity 0.15s ease',
   },
 };

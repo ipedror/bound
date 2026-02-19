@@ -15,6 +15,7 @@ export const DEFAULT_CANVAS_STATE: CanvasState = {
   fontColor: '#f1f1f1',
   opacity: 1,
   textMaxWidth: 0,
+  roughness: 0,
 };
 
 export const WEB_SAFE_FONTS = [
@@ -42,7 +43,10 @@ export const DEFAULT_SHAPE_STYLES = {
   stroke: '#00d4ff',
   strokeWidth: 2,
   opacity: 1,
+  roughness: 0,
 } as const;
+
+export const HAND_DRAWN_FONT = 'Segoe Print, Comic Sans MS, cursive';
 
 export const CANVAS_BACKGROUND_COLOR = '#1a1a2e';
 export const CANVAS_DEFAULT_WIDTH = 960;

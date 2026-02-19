@@ -11,6 +11,8 @@ import { GraphView } from '../components/GraphView';
 import { Island } from '../components/Island';
 import { PropertyType, LinkType } from '../types/enums';
 import { generateId } from '../utils/id';
+import { useTagDictionary } from '../hooks/useTagDictionary';
+import { getTagColor } from '../utils/tagColors';
 import type { Property } from '../types/property';
 
 export default function ContentPage() {
@@ -26,10 +28,14 @@ export default function ContentPage() {
   const [linksOpen, setLinksOpen] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [parentOpen, setParentOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [newTagInput, setNewTagInput] = useState('');
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [splitRatio, setSplitRatio] = useState(0.5);
   const propsRef = useRef<HTMLDivElement>(null);
   const linksRef = useRef<HTMLDivElement>(null);
   const parentRef = useRef<HTMLDivElement>(null);
+  const tagsRef = useRef<HTMLDivElement>(null);
   const splitContainerRef = useRef<HTMLDivElement>(null);
 
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
@@ -83,6 +89,16 @@ export default function ContentPage() {
 
   const content = useMemo(() => allContents.find((c) => c.id === contentId), [allContents, contentId]);
   const area = useMemo(() => areas.find((a) => content && content.areaId === a.id), [areas, content]);
+
+  // Global tag dictionary
+  const allGlobalTags = useTagDictionary();
+  const contentTags = content?.tags ?? [];
+  // Filter suggestions: match input, exclude already-applied tags
+  const tagSuggestions = useMemo(() => {
+    const query = newTagInput.trim().toLowerCase();
+    return allGlobalTags.filter((t) => !contentTags.includes(t) && (!query || t.toLowerCase().includes(query)));
+  }, [allGlobalTags, contentTags, newTagInput]);
+
   const links = useMemo(
     () => allLinks.filter((l) => l.fromContentId === contentId || l.toContentId === contentId),
     [allLinks, contentId],
@@ -130,10 +146,11 @@ export default function ContentPage() {
       if (propsOpen && propsRef.current && !propsRef.current.contains(e.target as Node)) setPropsOpen(false);
       if (linksOpen && linksRef.current && !linksRef.current.contains(e.target as Node)) setLinksOpen(false);
       if (parentOpen && parentRef.current && !parentRef.current.contains(e.target as Node)) setParentOpen(false);
+      if (tagsOpen && tagsRef.current && !tagsRef.current.contains(e.target as Node)) setTagsOpen(false);
     };
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
-  }, [propsOpen, linksOpen, parentOpen]);
+  }, [propsOpen, linksOpen, parentOpen, tagsOpen]);
 
   if (!content) {
     return (
@@ -189,6 +206,28 @@ export default function ContentPage() {
   const getLinkedContent = (link: typeof links[0]) => {
     const otherId = link.fromContentId === contentId ? link.toContentId : link.fromContentId;
     return allContents.find((c) => c.id === otherId);
+  };
+
+  const handleAddTag = () => {
+    const tag = newTagInput.trim();
+    if (!tag) return;
+    if (!contentTags.includes(tag)) {
+      updateContent(content.id, { tags: [...contentTags, tag] });
+    }
+    setNewTagInput('');
+    setShowTagSuggestions(false);
+  };
+
+  const handleSelectTagSuggestion = (tag: string) => {
+    if (!contentTags.includes(tag)) {
+      updateContent(content.id, { tags: [...contentTags, tag] });
+    }
+    setNewTagInput('');
+    setShowTagSuggestions(false);
+  };
+
+  const handleRemoveTag = (tag: string) => {
+    updateContent(content.id, { tags: contentTags.filter((t) => t !== tag) });
   };
 
   return (
@@ -434,6 +473,88 @@ export default function ContentPage() {
                       ))}
                     </div>
                   )}
+                </Island>
+              )}
+            </div>
+
+            {/* Tags toggle */}
+            <div ref={tagsRef} style={{ position: 'relative' }}>
+              <Island padding={4}>
+                <button
+                  style={styles.panelToggle}
+                  onClick={() => setTagsOpen(!tagsOpen)}
+                  title="Tags"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                    <line x1="7" y1="7" x2="7.01" y2="7" />
+                  </svg>
+                  <span style={styles.panelToggleLabel}>Tags</span>
+                  {contentTags.length > 0 && (
+                    <span style={styles.panelBadge}>{contentTags.length}</span>
+                  )}
+                </button>
+              </Island>
+
+              {/* Tags dropdown */}
+              {tagsOpen && (
+                <Island padding={12} style={styles.dropdownPanel}>
+                  <div style={styles.panelHeader}>
+                    <h3 style={styles.panelTitle}>Tags</h3>
+                  </div>
+                  {contentTags.length === 0 ? (
+                    <p style={styles.emptyText}>No tags</p>
+                  ) : (
+                    <div style={styles.tagsList}>
+                      {contentTags.map((tag) => {
+                        const color = getTagColor(tag);
+                        return (
+                          <span key={tag} style={{ ...styles.tagChip, backgroundColor: color.bg, color: color.text, borderColor: color.border }}>
+                            {tag}
+                            <button style={{ ...styles.removeBtn, color: color.text }} onClick={() => handleRemoveTag(tag)}>×</button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{ position: 'relative' }}>
+                    <div style={styles.tagInputRow}>
+                      <input
+                        type="text"
+                        value={newTagInput}
+                        onChange={(e) => { setNewTagInput(e.target.value); setShowTagSuggestions(true); }}
+                        onFocus={() => setShowTagSuggestions(true)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleAddTag();
+                          if (e.key === 'Escape') setShowTagSuggestions(false);
+                        }}
+                        style={styles.propInput}
+                        placeholder="Add tag..."
+                      />
+                      <button style={styles.addBtn} onClick={handleAddTag} disabled={!newTagInput.trim()}>+</button>
+                    </div>
+                    {/* Tag suggestions dropdown */}
+                    {showTagSuggestions && tagSuggestions.length > 0 && (
+                      <div style={styles.tagSuggestionsDropdown}>
+                        {tagSuggestions.slice(0, 8).map((tag) => {
+                          const color = getTagColor(tag);
+                          return (
+                            <button
+                              key={tag}
+                              style={styles.tagSuggestionItem}
+                              onMouseDown={(e) => { e.preventDefault(); handleSelectTagSuggestion(tag); }}
+                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.08)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                            >
+                              <span style={{ ...styles.tagSuggestionChip, backgroundColor: color.bg, color: color.text, borderColor: color.border }}>
+                                {tag}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </Island>
               )}
             </div>
@@ -778,5 +899,65 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px', marginBottom: '8px',
     cursor: 'pointer', color: '#f1f1f1', fontSize: '14px',
     transition: 'background-color 0.2s',
+  },
+  // Tags panel
+  tagsList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+    marginBottom: '10px',
+  },
+  tagChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '3px 10px',
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    color: '#38bdf8',
+    border: '1px solid rgba(56, 189, 248, 0.3)',
+    borderRadius: '14px',
+    fontSize: '11px',
+    fontWeight: 500,
+  },
+  tagInputRow: {
+    display: 'flex',
+    gap: '6px',
+    alignItems: 'center',
+    marginTop: '8px',
+  },
+  tagSuggestionsDropdown: {
+    position: 'absolute',
+    top: 'calc(100% + 4px)',
+    left: 0,
+    right: 0,
+    backgroundColor: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: '8px',
+    padding: '4px',
+    zIndex: 200,
+    maxHeight: '180px',
+    overflowY: 'auto',
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+  },
+  tagSuggestionItem: {
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    padding: '6px 8px',
+    backgroundColor: 'transparent',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    transition: 'background-color 0.12s ease',
+    textAlign: 'left' as const,
+  },
+  tagSuggestionChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '2px 8px',
+    borderRadius: '12px',
+    fontSize: '11px',
+    fontWeight: 500,
+    border: '1px solid',
   },
 };

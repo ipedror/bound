@@ -15,6 +15,7 @@ import { ShapeType } from '../types/enums';
 import type { Position } from '../types/base';
 import {
   CANVAS_BACKGROUND_COLOR,
+  HAND_DRAWN_FONT,
 } from '../constants/canvas';
 
 const ZOOM_MIN = 0.1;
@@ -38,6 +39,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     setStrokeColor,
     setStrokeWidth,
     setOpacity,
+    setRoughness,
     setFontFamily,
     setFontSize,
     setTextMaxWidth,
@@ -74,12 +76,20 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   // Selection rectangle (rubber-band) state
   const [selectionStart, setSelectionStart] = useState<Position | null>(null);
   const [selectionCurrent, setSelectionCurrent] = useState<Position | null>(null);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const panRef = useRef<{
+    startPointer: { x: number; y: number };
+    startStagePos: Position;
+  } | null>(null);
   // Multi-drag: track dragged shape and all selected shapes' start positions
   const dragInfoRef = useRef<{
     shapeId: string;
     modelPositions: Map<string, Position>;   // model positions (top-left) at drag start
     nodePositions: Map<string, Position>;    // konva node positions at drag start
   } | null>(null);
+
+  const isPanMode = isSpacePressed && !textInputVisible;
 
   // Resize stage to fill container
   useEffect(() => {
@@ -155,6 +165,64 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo, selectedShapeIds, removeShape, setSelectedShapeIds, groupSelectedShapes, ungroupSelectedShapes]);
+
+  // Spacebar: temporary pan (hand tool)
+  useEffect(() => {
+    const shouldIgnoreForTyping = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      return (
+        el.tagName === 'INPUT' ||
+        el.tagName === 'TEXTAREA' ||
+        el.isContentEditable
+      );
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      if (shouldIgnoreForTyping(e.target)) return;
+      e.preventDefault();
+      setIsSpacePressed(true);
+    };
+
+    const stopPan = () => {
+      panRef.current = null;
+      setIsPanning(false);
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      setIsSpacePressed(false);
+      stopPan();
+    };
+
+    const onBlur = () => {
+      setIsSpacePressed(false);
+      stopPan();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  // If mouseup happens outside the stage, stop panning
+  useEffect(() => {
+    if (!isPanning) return;
+    const onMouseUp = () => {
+      if (!panRef.current) return;
+      panRef.current = null;
+      setIsPanning(false);
+    };
+
+    window.addEventListener('mouseup', onMouseUp);
+    return () => window.removeEventListener('mouseup', onMouseUp);
+  }, [isPanning]);
 
   // Handle paste: images from clipboard
   useEffect(() => {
@@ -316,6 +384,20 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   const handleMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (textInputVisible) return;
+
+      if (isPanMode) {
+        const stage = stageRef.current;
+        const pointer = stage?.getPointerPosition();
+        if (!pointer) return;
+        e.evt?.preventDefault();
+        panRef.current = {
+          startPointer: { x: pointer.x, y: pointer.y },
+          startStagePos: { ...stagePos },
+        };
+        setIsPanning(true);
+        return;
+      }
+
       const pos = getPointerPosition();
       if (!pos) return;
 
@@ -332,6 +414,15 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           setSelectionCurrent(pos);
         }
         // Shape click selection is handled by handleShapeSelect via onClick on shapes
+        return;
+      }
+
+      if (canvasState.tool === ToolType.MOUSE) {
+        if (clickedOnEmpty) {
+          setSelectedShapeIds([]);
+        }
+        // In MOUSE mode, we never start rubber-band selection.
+        // Shape click selection is handled by handleShapeSelect via onClick on shapes.
         return;
       }
 
@@ -361,10 +452,24 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         }
       }
     },
-    [canvasState.tool, getPointerPosition, setSelectedShapeIds, shapes, removeShape, textInputVisible],
+    [canvasState.tool, getPointerPosition, isPanMode, removeShape, setSelectedShapeIds, shapes, stagePos, textInputVisible],
   );
 
   const handleMouseMove = useCallback(() => {
+    if (isPanMode && panRef.current) {
+      const stage = stageRef.current;
+      const pointer = stage?.getPointerPosition();
+      if (!pointer) return;
+
+      const dx = pointer.x - panRef.current.startPointer.x;
+      const dy = pointer.y - panRef.current.startPointer.y;
+      setStagePos({
+        x: panRef.current.startStagePos.x + dx,
+        y: panRef.current.startStagePos.y + dy,
+      });
+      return;
+    }
+
     const pos = getPointerPosition();
     if (!pos) return;
 
@@ -376,9 +481,15 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
     if (!drawStartPos) return;
     setCurrentDrawPos(pos);
-  }, [drawStartPos, selectionStart, getPointerPosition]);
+  }, [drawStartPos, getPointerPosition, isPanMode, selectionStart]);
 
   const handleMouseUp = useCallback((e?: Konva.KonvaEventObject<MouseEvent>) => {
+    if (isPanMode && panRef.current) {
+      panRef.current = null;
+      setIsPanning(false);
+      return;
+    }
+
     // Finish rubber-band area selection
     if (selectionStart && selectionCurrent) {
       const x1 = Math.min(selectionStart.x, selectionCurrent.x);
@@ -445,7 +556,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
     setDrawStartPos(null);
     setCurrentDrawPos(null);
-  }, [selectionStart, selectionCurrent, drawStartPos, currentDrawPos, canvasState, addShape, textInputVisible, shapes, setSelectedShapeIds]);
+  }, [isPanMode, selectionStart, selectionCurrent, drawStartPos, currentDrawPos, canvasState, addShape, textInputVisible, shapes, setSelectedShapeIds]);
 
   const handleTextInputSubmit = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -498,6 +609,11 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
   const handleShapeSelect = useCallback(
     (shapeId: string, e?: React.MouseEvent | Konva.KonvaEventObject<MouseEvent>) => {
+      if (canvasState.tool === ToolType.MOUSE) {
+        setSelectedShapeIds([shapeId]);
+        return;
+      }
+
       if (canvasState.tool === ToolType.SELECT) {
         const nativeEvent = e && 'evt' in e ? e.evt : e;
         const shape = shapes.find((s) => s.id === shapeId);
@@ -538,6 +654,16 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
 
   const handleShapeDragStart = useCallback(
     (shapeId: string) => {
+      if (canvasState.tool === ToolType.MOUSE) {
+        dragInfoRef.current = {
+          shapeId,
+          modelPositions: new Map([[shapeId, { ...(shapes.find((s) => s.id === shapeId)?.position ?? { x: 0, y: 0 }) }]]),
+          nodePositions: new Map(),
+        };
+        setSelectedShapeIds([shapeId]);
+        return;
+      }
+
       let ids = selectedShapeIds.includes(shapeId) ? [...selectedShapeIds] : [shapeId];
 
       // Include all group members for any grouped shape in the set
@@ -573,7 +699,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         setSelectedShapeIds(ids);
       }
     },
-    [shapes, selectedShapeIds, setSelectedShapeIds],
+    [canvasState.tool, shapes, selectedShapeIds, setSelectedShapeIds],
   );
 
   // Real-time companion movement during drag
@@ -676,6 +802,16 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     [setOpacity, selectedShapeIds, updateShapeStyle],
   );
 
+  const handleSetRoughness = useCallback(
+    (roughness: number) => {
+      setRoughness(roughness);
+      for (const id of selectedShapeIds) {
+        updateShapeStyle(id, { roughness });
+      }
+    },
+    [setRoughness, selectedShapeIds, updateShapeStyle],
+  );
+
   const renderPreview = () => {
     if (!drawStartPos || !currentDrawPos) return null;
     const x = Math.min(drawStartPos.x, currentDrawPos.x);
@@ -765,10 +901,13 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
   };
 
   const getCursor = () => {
+    if (isPanMode) return isPanning ? 'grabbing' : 'grab';
     switch (canvasState.tool) {
       case ToolType.SELECT: return 'default';
+      case ToolType.MOUSE: return 'default';
       case ToolType.ERASER: return 'crosshair';
       case ToolType.TEXT: return 'text';
+      case ToolType.ARROW: return `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='5' y1='19' x2='19' y2='5'/%3E%3Cpolyline points='10 5 19 5 19 14'/%3E%3C/svg%3E") 12 12, crosshair`;
       default: return 'crosshair';
     }
   };
@@ -816,7 +955,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
                 key={shape.id}
                 shape={shape}
                 isSelected={selectedShapeIds.includes(shape.id)}
-                isDraggable={canvasState.tool === ToolType.SELECT}
+                isDraggable={(canvasState.tool === ToolType.SELECT || canvasState.tool === ToolType.MOUSE) && !isPanMode}
                 onSelect={(e) => handleShapeSelect(shape.id, e)}
                 onUpdate={(updates) => handleShapeUpdate(shape.id, updates)}
                 onDragStart={() => handleShapeDragStart(shape.id)}
@@ -845,7 +984,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
               ...styles.textInput,
               top: textScreenPos.y,
               left: textScreenPos.x,
-              fontFamily: canvasState.fontFamily,
+              fontFamily: canvasState.roughness > 0 ? HAND_DRAWN_FONT : canvasState.fontFamily,
               fontSize: `${canvasState.fontSize * scale}px`,
               color: canvasState.fontColor,
               ...(canvasState.textMaxWidth > 0
@@ -865,6 +1004,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           onSetStrokeColor={handleSetStrokeColor}
           onSetStrokeWidth={handleSetStrokeWidth}
           onSetOpacity={handleSetOpacity}
+          onSetRoughness={handleSetRoughness}
           onSetFontFamily={setFontFamily}
           onSetFontSize={setFontSize}
           onSetTextMaxWidth={setTextMaxWidth}
@@ -935,10 +1075,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   textInput: {
     position: 'absolute',
-    background: CANVAS_BACKGROUND_COLOR,
-    border: '2px solid #00d4ff',
-    borderRadius: '4px',
-    padding: '4px 8px',
+    background: 'rgba(26, 26, 46, 0.9)',
+    border: '2px solid rgba(0, 212, 255, 0.5)',
+    borderRadius: '6px',
+    padding: '6px 10px',
     outline: 'none',
     minWidth: '150px',
     zIndex: 1000,
@@ -946,32 +1086,36 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     lineHeight: 1.5,
     fontFamily: 'inherit',
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
   },
   zoomBar: {
     position: 'absolute',
-    bottom: '12px',
+    bottom: '14px',
     left: '50%',
     transform: 'translateX(-50%)',
     zIndex: 100,
   },
   zoomButton: {
-    width: '28px',
-    height: '28px',
+    width: '30px',
+    height: '30px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
-    color: '#e2e8f0',
+    color: '#94a3b8',
     border: '1px solid transparent',
     borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: '15px',
+    transition: 'color 0.12s ease',
   },
   zoomLabel: {
     fontSize: '11px',
-    color: '#94a3b8',
-    minWidth: '36px',
+    color: '#64748b',
+    minWidth: '40px',
     textAlign: 'center',
+    fontFamily: 'monospace',
+    fontWeight: 500,
   },
 };
 

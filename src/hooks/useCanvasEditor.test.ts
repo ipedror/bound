@@ -147,6 +147,16 @@ describe('useCanvasEditor', () => {
 
       expect(result.current.canvasState.fontSize).toBe(24);
     });
+
+    it('should set roughness', () => {
+      const { result } = renderHook(() => useCanvasEditor(contentId));
+
+      act(() => {
+        result.current.setRoughness(1);
+      });
+
+      expect(result.current.canvasState.roughness).toBe(1);
+    });
   });
 
   describe('Shape Operations', () => {

@@ -47,6 +47,7 @@ export interface CytoscapeNodeData {
   readonly contentId: string;
   readonly areaId: string;
   readonly label: string;
+  readonly labelFontSize?: number;
   readonly emoji?: string;
   readonly emojiImage?: string;
   readonly title: string;
@@ -59,6 +60,8 @@ export interface CytoscapeNodeData {
   readonly hierarchyDepth?: number;
   /** Name of the hierarchy level this node belongs to (from HierarchyLevelConfig) */
   readonly levelName?: string;
+  /** Whether the node's emoji/color was inherited from a parent */
+  readonly isInheritedStyle?: boolean;
 }
 
 export interface CytoscapeNode {
@@ -112,6 +115,7 @@ export interface GraphFrame {
   readonly backgroundColor?: string;
   readonly borderColor?: string;
   readonly texts?: GraphFrameText[];
+  readonly shapes?: GraphFrameShape[];
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -123,4 +127,16 @@ export interface GraphFrameText {
   readonly y: number;
   readonly color?: string;
   readonly fontSize?: number;
+  readonly fontWeight?: 'normal' | 'bold';
+}
+
+export interface GraphFrameShape {
+  readonly id: string;
+  readonly type: 'line' | 'arrow' | 'rect';
+  readonly startX: number;
+  readonly startY: number;
+  readonly endX: number;
+  readonly endY: number;
+  readonly color?: string;
+  readonly strokeWidth?: number;
 }
