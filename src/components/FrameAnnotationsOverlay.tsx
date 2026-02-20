@@ -7,6 +7,8 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import type { Core } from 'cytoscape';
 import type { GraphFrame, GraphFrameText, GraphFrameShape } from '../types/graph';
+import { useAppStore } from '../store/appStore';
+import { generateId } from '../utils/id';
 
 const ANNOTATION_COLORS = [
   '#94a3b8', // slate
@@ -23,16 +25,22 @@ const ANNOTATION_COLORS = [
 interface FrameAnnotationsOverlayProps {
   cyRef: React.RefObject<Core | null>;
   frames: GraphFrame[];
+  refreshTick?: number;
   onUpdateText: (frameId: string, textId: string, updates: Partial<GraphFrameText>) => void;
   onDeleteText: (frameId: string, textId: string) => void;
   onUpdateShape: (frameId: string, shapeId: string, updates: Partial<GraphFrameShape>) => void;
   onDeleteShape: (frameId: string, shapeId: string) => void;
+  onAddText?: (frameId: string, text: GraphFrameText) => void;
+  onAddShape?: (frameId: string, shape: GraphFrameShape) => void;
+  onFrameClick?: (frameId: string) => void;
+  onUpdateFrame?: (frameId: string, updates: Partial<Pick<GraphFrame, 'position' | 'width' | 'height'>>) => void;
 }
 
-type DragMode = 'move' | 'resize-start' | 'resize-end' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
+type DragMode = 'move' | 'resize-start' | 'resize-end' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br'
+  | 'frame-resize-tl' | 'frame-resize-tr' | 'frame-resize-bl' | 'frame-resize-br';
 
 interface DragState {
-  type: 'text' | 'shape';
+  type: 'text' | 'shape' | 'frame';
   frameId: string;
   id: string;
   /** Model-space start position of the mouse */
@@ -44,6 +52,9 @@ interface DragState {
   /** For shapes: original end position */
   origEndX?: number;
   origEndY?: number;
+  /** For frame resize: original width/height */
+  origWidth?: number;
+  origHeight?: number;
   /** Drag mode: move whole annotation or resize a specific handle */
   mode: DragMode;
 }
@@ -51,12 +62,20 @@ interface DragState {
 export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
   cyRef,
   frames,
+  refreshTick,
   onUpdateText,
   onDeleteText,
   onUpdateShape,
   onDeleteShape,
+  onAddText,
+  onAddShape,
+  onFrameClick,
+  onUpdateFrame,
 }: FrameAnnotationsOverlayProps) {
+  void refreshTick;
   const svgRef = useRef<SVGSVGElement>(null);
+  const pauseUndo = useAppStore((s) => s.pauseUndo);
+  const resumeUndo = useAppStore((s) => s.resumeUndo);
   const [transform, setTransform] = useState({ pan: { x: 0, y: 0 }, zoom: 1 });
   const [editingText, setEditingText] = useState<{ frameId: string; textId: string } | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -65,6 +84,7 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
     frameId: string;
     id: string;
   } | null>(null);
+  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
 
   // Drag state via ref to avoid stale closures in mouse handlers
   const dragRef = useRef<DragState | null>(null);
@@ -83,6 +103,8 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
   onUpdateTextRef.current = onUpdateText;
   const onUpdateShapeRef = useRef(onUpdateShape);
   onUpdateShapeRef.current = onUpdateShape;
+  const onUpdateFrameRef = useRef(onUpdateFrame);
+  onUpdateFrameRef.current = onUpdateFrame;
 
   const getFrameOrigin = useCallback((frame: GraphFrame) => {
     const cy = cyRef.current;
@@ -102,31 +124,71 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
   }, [cyRef]);
 
   // Sync pan/zoom from Cytoscape
+  // Uses retry pattern because cyRef.current may be null on first render
+  // (child effects run before parent effects that create the Cytoscape instance)
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
+    let cleanupFn: (() => void) | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const sync = () => {
-      const pan = cy.pan();
-      const zoom = cy.zoom();
-      setTransform({ pan: { x: pan.x, y: pan.y }, zoom });
+    const setup = () => {
+      const cy = cyRef.current;
+      if (!cy) {
+        retryTimer = setTimeout(setup, 50);
+        return;
+      }
+      const sync = () => {
+        const pan = cy.pan();
+        const zoom = cy.zoom();
+        setTransform({ pan: { x: pan.x, y: pan.y }, zoom });
+      };
+
+      // Force overlay repaint while frames move, even if pan/zoom don't change.
+      // This keeps texts/shapes visually attached during drag (no teleport on mouseup).
+      const syncFrameMotion = () => {
+        setTransform((prev) => ({
+          pan: { x: prev.pan.x, y: prev.pan.y },
+          zoom: prev.zoom,
+        }));
+      };
+
+      sync();
+      cy.on('pan zoom', sync);
+      cy.on('position drag free', 'node[nodeType = "frame"]', syncFrameMotion);
+      cleanupFn = () => {
+        cy.off('pan zoom', sync);
+        cy.off('position drag free', 'node[nodeType = "frame"]', syncFrameMotion);
+      };
     };
 
-    sync();
-    cy.on('pan zoom', sync);
+    setup();
+
     return () => {
-      cy.off('pan zoom', sync);
+      if (retryTimer) clearTimeout(retryTimer);
+      cleanupFn?.();
     };
   }, [cyRef]);
 
   // Deselect annotation when user clicks on Cytoscape canvas (nodes, edges, background)
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const deselect = () => setSelectedAnnotation(null);
-    cy.on('tap', deselect);
+    let cleanupFn: (() => void) | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const setup = () => {
+      const cy = cyRef.current;
+      if (!cy) {
+        retryTimer = setTimeout(setup, 50);
+        return;
+      }
+      const deselect = () => { setSelectedAnnotation(null); setSelectedFrameId(null); };
+      cy.on('tap', deselect);
+      cleanupFn = () => { cy.off('tap', deselect); };
+    };
+
+    setup();
+
     return () => {
-      cy.off('tap', deselect);
+      if (retryTimer) clearTimeout(retryTimer);
+      cleanupFn?.();
     };
   }, [cyRef]);
 
@@ -192,9 +254,10 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
         };
       }
 
+      pauseUndo();
       setIsDragging(true);
     },
-    [screenToModel],
+    [screenToModel, pauseUndo],
   );
 
   // --- Resize handle mousedown ---
@@ -269,9 +332,46 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
         };
       }
 
+      pauseUndo();
       setIsDragging(true);
     },
-    [screenToModel],
+    [screenToModel, pauseUndo],
+  );
+
+  // --- Frame resize handle mousedown ---
+  const handleFrameResizeMouseDown = useCallback(
+    (
+      e: React.MouseEvent,
+      frameId: string,
+      mode: DragMode,
+    ) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+
+      const frame = framesRef.current.find((f) => f.id === frameId);
+      if (!frame) return;
+
+      const model = screenToModel(e.clientX, e.clientY);
+      const frameOrigin = getFrameOrigin(frame);
+
+      dragRef.current = {
+        type: 'frame',
+        frameId,
+        id: frameId,
+        startModelX: model.x,
+        startModelY: model.y,
+        origX: frameOrigin.x,
+        origY: frameOrigin.y,
+        origWidth: frame.width,
+        origHeight: frame.height,
+        mode,
+      };
+
+      pauseUndo();
+      setIsDragging(true);
+    },
+    [screenToModel, getFrameOrigin, pauseUndo],
   );
 
   // --- Drag: mousemove & mouseup on window ---
@@ -283,6 +383,71 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
       const model = screenToModel(e.clientX, e.clientY);
       const dx = model.x - drag.startModelX;
       const dy = model.y - drag.startModelY;
+
+      if (drag.type === 'frame') {
+        // Frame corner resize
+        const ow = drag.origWidth ?? 0;
+        const oh = drag.origHeight ?? 0;
+        const MIN_SIZE = 60;
+        let newX = drag.origX;
+        let newY = drag.origY;
+        let newW = ow;
+        let newH = oh;
+
+        switch (drag.mode) {
+          case 'frame-resize-tl':
+            newX = drag.origX + dx;
+            newY = drag.origY + dy;
+            newW = ow - dx;
+            newH = oh - dy;
+            break;
+          case 'frame-resize-tr':
+            newY = drag.origY + dy;
+            newW = ow + dx;
+            newH = oh - dy;
+            break;
+          case 'frame-resize-bl':
+            newX = drag.origX + dx;
+            newW = ow - dx;
+            newH = oh + dy;
+            break;
+          case 'frame-resize-br':
+            newW = ow + dx;
+            newH = oh + dy;
+            break;
+        }
+
+        // Enforce minimum size
+        if (newW < MIN_SIZE) {
+          if (drag.mode === 'frame-resize-tl' || drag.mode === 'frame-resize-bl') {
+            newX = drag.origX + ow - MIN_SIZE;
+          }
+          newW = MIN_SIZE;
+        }
+        if (newH < MIN_SIZE) {
+          if (drag.mode === 'frame-resize-tl' || drag.mode === 'frame-resize-tr') {
+            newY = drag.origY + oh - MIN_SIZE;
+          }
+          newH = MIN_SIZE;
+        }
+
+        onUpdateFrameRef.current?.(drag.frameId, {
+          position: { x: newX, y: newY },
+          width: newW,
+          height: newH,
+        });
+
+        // Also update the Cytoscape node directly for live feedback
+        const cy = cyRef.current;
+        if (cy) {
+          const frameNode = cy.getElementById(`frame:${drag.frameId}`);
+          if (frameNode && frameNode.length > 0) {
+            frameNode.position({ x: newX + newW / 2, y: newY + newH / 2 });
+            frameNode.style({ width: newW, height: newH });
+          }
+        }
+        return;
+      }
 
       if (drag.type === 'text') {
         onUpdateTextRef.current(drag.frameId, drag.id, {
@@ -297,21 +462,53 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
           endY: (drag.origEndY ?? 0) + dy,
         });
       } else if (drag.mode === 'resize-start') {
+        let newX = drag.origX + dx;
+        let newY = drag.origY + dy;
+        // Shift: snap line/arrow start to 45-degree angles relative to end
+        if (e.shiftKey && drag.origEndX !== undefined && drag.origEndY !== undefined) {
+          const aDx = newX - drag.origEndX;
+          const aDy = newY - drag.origEndY;
+          const angle = Math.atan2(aDy, aDx);
+          const snapAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+          const dist = Math.sqrt(aDx * aDx + aDy * aDy);
+          newX = drag.origEndX + dist * Math.cos(snapAngle);
+          newY = drag.origEndY + dist * Math.sin(snapAngle);
+        }
         onUpdateShapeRef.current(drag.frameId, drag.id, {
-          startX: drag.origX + dx,
-          startY: drag.origY + dy,
+          startX: newX,
+          startY: newY,
         });
       } else if (drag.mode === 'resize-end') {
+        let newX = drag.origX + dx;
+        let newY = drag.origY + dy;
+        // Shift: snap line/arrow end to 45-degree angles relative to start
+        if (e.shiftKey && drag.origEndX !== undefined && drag.origEndY !== undefined) {
+          const aDx = newX - drag.origEndX;
+          const aDy = newY - drag.origEndY;
+          const angle = Math.atan2(aDy, aDx);
+          const snapAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+          const dist = Math.sqrt(aDx * aDx + aDy * aDy);
+          newX = drag.origEndX + dist * Math.cos(snapAngle);
+          newY = drag.origEndY + dist * Math.sin(snapAngle);
+        }
         onUpdateShapeRef.current(drag.frameId, drag.id, {
-          endX: drag.origX + dx,
-          endY: drag.origY + dy,
+          endX: newX,
+          endY: newY,
         });
       } else {
         // Rect corner resize: dragged corner moves, opposite stays fixed
-        const newDraggedX = drag.origX + dx;
-        const newDraggedY = drag.origY + dy;
+        let newDraggedX = drag.origX + dx;
+        let newDraggedY = drag.origY + dy;
         const fixedX = drag.origEndX ?? 0;
         const fixedY = drag.origEndY ?? 0;
+        // Shift: force square proportions
+        if (e.shiftKey) {
+          const w = Math.abs(newDraggedX - fixedX);
+          const h = Math.abs(newDraggedY - fixedY);
+          const maxDim = Math.max(w, h);
+          newDraggedX = fixedX + maxDim * Math.sign(newDraggedX - fixedX || 1);
+          newDraggedY = fixedY + maxDim * Math.sign(newDraggedY - fixedY || 1);
+        }
         onUpdateShapeRef.current(drag.frameId, drag.id, {
           startX: Math.min(newDraggedX, fixedX),
           startY: Math.min(newDraggedY, fixedY),
@@ -324,6 +521,7 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
     const onMouseUp = () => {
       if (!dragRef.current) return;
       dragRef.current = null;
+      resumeUndo();
       setIsDragging(false);
     };
 
@@ -333,7 +531,7 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [screenToModel]);
+  }, [screenToModel, resumeUndo]);
 
   const handleTextDoubleClick = useCallback(
     (frameId: string, text: GraphFrameText) => {
@@ -359,6 +557,7 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
   const handleSvgClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       setSelectedAnnotation(null);
+      setSelectedFrameId(null);
     }
   }, []);
 
@@ -366,6 +565,7 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
     if (e.button !== 0) return;
     if (e.target === e.currentTarget) {
       setSelectedAnnotation(null);
+      setSelectedFrameId(null);
     }
   }, []);
 
@@ -386,6 +586,73 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedAnnotation, editingText, onDeleteText, onDeleteShape]);
+
+  // --- Copy/Paste annotations ---
+  const annotationClipboardRef = useRef<{
+    type: 'text';
+    data: GraphFrameText;
+    frameId: string;
+  } | {
+    type: 'shape';
+    data: GraphFrameShape;
+    frameId: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (editingText) return;
+      // Copy: Ctrl+C
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedAnnotation) {
+        const frame = framesRef.current.find((f) => f.id === selectedAnnotation.frameId);
+        if (!frame) return;
+        if (selectedAnnotation.type === 'text') {
+          const text = (frame.texts ?? []).find((t) => t.id === selectedAnnotation.id);
+          if (text) {
+            annotationClipboardRef.current = { type: 'text', data: { ...text }, frameId: frame.id };
+          }
+        } else {
+          const shape = (frame.shapes ?? []).find((s) => s.id === selectedAnnotation.id);
+          if (shape) {
+            annotationClipboardRef.current = { type: 'shape', data: { ...shape }, frameId: frame.id };
+          }
+        }
+      }
+      // Paste: Ctrl+V
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && annotationClipboardRef.current) {
+        const clip = annotationClipboardRef.current;
+        // Paste into the same frame or currently selected frame
+        const targetFrameId = selectedFrameId ?? clip.frameId;
+        const targetFrame = framesRef.current.find((f) => f.id === targetFrameId);
+        if (!targetFrame) return;
+
+        const PASTE_OFFSET = 20;
+
+        if (clip.type === 'text' && onAddText) {
+          const newText: GraphFrameText = {
+            ...clip.data,
+            id: generateId(),
+            x: clip.data.x + PASTE_OFFSET,
+            y: clip.data.y + PASTE_OFFSET,
+          };
+          onAddText(targetFrameId, newText);
+          setSelectedAnnotation({ type: 'text', frameId: targetFrameId, id: newText.id });
+        } else if (clip.type === 'shape' && onAddShape) {
+          const newShape: GraphFrameShape = {
+            ...clip.data,
+            id: generateId(),
+            startX: clip.data.startX + PASTE_OFFSET,
+            startY: clip.data.startY + PASTE_OFFSET,
+            endX: clip.data.endX + PASTE_OFFSET,
+            endY: clip.data.endY + PASTE_OFFSET,
+          };
+          onAddShape(targetFrameId, newShape);
+          setSelectedAnnotation({ type: 'shape', frameId: targetFrameId, id: newShape.id });
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedAnnotation, selectedFrameId, editingText, onAddText, onAddShape]);
 
   // Compute cursor based on drag mode
   const dragCursor = isDragging
@@ -415,6 +682,7 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
         screenY: absY * transform.zoom + transform.pan.y - 10,
         currentColor: text.color ?? '#e2e8f0',
         fontWeight: text.fontWeight ?? 'normal',
+        fontSize: text.fontSize ?? 14,
       };
     } else {
       const shape = (frame.shapes ?? []).find((s) => s.id === selectedAnnotation.id);
@@ -453,6 +721,17 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
     onUpdateText(selectedAnnotation.frameId, selectedAnnotation.id, { fontWeight: newWeight });
   }, [selectedAnnotation, frames, onUpdateText]);
 
+  const handleFontSizeChange = useCallback((delta: number) => {
+    if (!selectedAnnotation || selectedAnnotation.type !== 'text') return;
+    const frame = frames.find((f) => f.id === selectedAnnotation.frameId);
+    if (!frame) return;
+    const text = (frame.texts ?? []).find((t) => t.id === selectedAnnotation.id);
+    if (!text) return;
+    const currentSize = text.fontSize ?? 14;
+    const newSize = Math.max(8, Math.min(48, currentSize + delta));
+    onUpdateText(selectedAnnotation.frameId, selectedAnnotation.id, { fontSize: newSize });
+  }, [selectedAnnotation, frames, onUpdateText]);
+
   return (
     <svg
       ref={svgRef}
@@ -462,7 +741,7 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
         left: 0,
         width: '100%',
         height: '100%',
-        pointerEvents: (isDragging || !!selectedAnnotation || !!editingText) ? 'auto' : 'none',
+        pointerEvents: (isDragging || !!selectedAnnotation || !!editingText || !!selectedFrameId) ? 'auto' : 'none',
         zIndex: 3,
         overflow: 'hidden',
         cursor: dragCursor,
@@ -480,6 +759,72 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
 
           return (
             <g key={frame.id}>
+              {/* Invisible border hit area for selecting the frame */}
+              <rect
+                x={frameOrigin.x}
+                y={frameOrigin.y}
+                width={frame.width}
+                height={frame.height}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={Math.max(12 / transform.zoom, 6)}
+                style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedFrameId(frame.id);
+                  onFrameClick?.(frame.id);
+                }}
+              />
+
+              {/* Frame title clickable area */}
+              <text
+                x={frameOrigin.x + frame.width / 2}
+                y={frameOrigin.y - 8}
+                fill={frame.borderColor ?? 'rgba(56, 189, 248, 0.7)'}
+                fontSize={13}
+                fontWeight="bold"
+                fontFamily="Arial, sans-serif"
+                textAnchor="middle"
+                style={{ pointerEvents: 'auto', cursor: 'pointer', userSelect: 'none' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedFrameId(frame.id);
+                  onFrameClick?.(frame.id);
+                }}
+              >
+                {frame.title}
+              </text>
+
+              {/* Frame corner resize handles (only when frame is selected) */}
+              {selectedFrameId === frame.id && (
+                <>
+                  <circle
+                    cx={frameOrigin.x} cy={frameOrigin.y} r={handleR}
+                    fill="#38bdf8" stroke="#fff" strokeWidth={handleStrokeW}
+                    style={{ pointerEvents: 'auto', cursor: 'nwse-resize' }}
+                    onMouseDown={(e) => handleFrameResizeMouseDown(e, frame.id, 'frame-resize-tl')}
+                  />
+                  <circle
+                    cx={frameOrigin.x + frame.width} cy={frameOrigin.y} r={handleR}
+                    fill="#38bdf8" stroke="#fff" strokeWidth={handleStrokeW}
+                    style={{ pointerEvents: 'auto', cursor: 'nesw-resize' }}
+                    onMouseDown={(e) => handleFrameResizeMouseDown(e, frame.id, 'frame-resize-tr')}
+                  />
+                  <circle
+                    cx={frameOrigin.x} cy={frameOrigin.y + frame.height} r={handleR}
+                    fill="#38bdf8" stroke="#fff" strokeWidth={handleStrokeW}
+                    style={{ pointerEvents: 'auto', cursor: 'nesw-resize' }}
+                    onMouseDown={(e) => handleFrameResizeMouseDown(e, frame.id, 'frame-resize-bl')}
+                  />
+                  <circle
+                    cx={frameOrigin.x + frame.width} cy={frameOrigin.y + frame.height} r={handleR}
+                    fill="#38bdf8" stroke="#fff" strokeWidth={handleStrokeW}
+                    style={{ pointerEvents: 'auto', cursor: 'nwse-resize' }}
+                    onMouseDown={(e) => handleFrameResizeMouseDown(e, frame.id, 'frame-resize-br')}
+                  />
+                </>
+              )}
+
               {/* Render shapes */}
               {shapes.map((shape) => {
                 const absX1 = frameOrigin.x + shape.startX;
@@ -595,12 +940,12 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
                   const rh = Math.abs(absY2 - absY1);
                   return (
                     <g key={shape.id}>
-                      {/* Hit area (filled for easier grabbing) */}
+                      {/* Hit area (stroke-only for click-through interior) */}
                       <rect
                         x={rx} y={ry} width={rw} height={rh}
-                        fill="transparent"
+                        fill="none"
                         stroke="transparent" strokeWidth={hitWidth}
-                        style={{ pointerEvents: 'auto', cursor: 'grab' }}
+                        style={{ pointerEvents: 'stroke', cursor: 'grab' }}
                         onMouseDown={(e) => handleAnnotationMouseDown(e, 'shape', frame.id, shape.id)}
                       />
                       {/* Visual */}
@@ -724,9 +1069,9 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
       {/* Floating toolbar for selected annotation */}
       {toolbarInfo && !isDragging && (
         <foreignObject
-          x={toolbarInfo.screenX - 100}
+          x={toolbarInfo.screenX - 140}
           y={toolbarInfo.screenY - 40}
-          width={220}
+          width={320}
           height={36}
           style={{ pointerEvents: 'auto', overflow: 'visible' }}
         >
@@ -799,6 +1144,67 @@ export const FrameAnnotationsOverlay = memo(function FrameAnnotationsOverlay({
                   title="Bold"
                 >
                   B
+                </button>
+                <div style={{
+                  width: 1,
+                  height: 18,
+                  background: 'rgba(148,163,184,0.3)',
+                  margin: '0 2px',
+                  flexShrink: 0,
+                }} />
+                <button
+                  onClick={() => handleFontSizeChange(-2)}
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: '4px',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    padding: 0,
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 'bold',
+                  }}
+                  title="Decrease font size"
+                >
+                  A-
+                </button>
+                <span style={{
+                  fontSize: '10px',
+                  color: '#94a3b8',
+                  minWidth: '20px',
+                  textAlign: 'center',
+                  flexShrink: 0,
+                  userSelect: 'none',
+                }}>
+                  {toolbarInfo.fontSize}
+                </span>
+                <button
+                  onClick={() => handleFontSizeChange(2)}
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: '4px',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    padding: 0,
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 'bold',
+                  }}
+                  title="Increase font size"
+                >
+                  A+
                 </button>
               </>
             )}

@@ -14,9 +14,12 @@ export class ContentManager {
    * Create a new Content in the specified Area.
    */
   static createContent(areaId: string, title: string, state: AppState): Content {
-    const area = state.areas.find((a) => a.id === areaId);
-    if (!area) {
-      throw new Error(`Area ${areaId} not found`);
+    // Allow empty areaId for area-less contents
+    if (areaId) {
+      const area = state.areas.find((a) => a.id === areaId);
+      if (!area) {
+        throw new Error(`Area ${areaId} not found`);
+      }
     }
 
     const now = Date.now();
@@ -51,7 +54,6 @@ export class ContentManager {
       ...content,
       ...updates,
       id: content.id, // Protect immutable fields
-      areaId: content.areaId,
       createdAt: content.createdAt,
       updatedAt: Date.now(),
     };
@@ -340,8 +342,8 @@ export class ContentManager {
       errors.push('Content title is required');
     }
 
-    if (!content.areaId || content.areaId.trim() === '') {
-      errors.push('Content must belong to an Area');
+    if (content.areaId === undefined || content.areaId === null) {
+      errors.push('Content areaId must be a string (use empty string for no area)');
     }
 
     if (content.status !== ContentStatus.OPEN && content.status !== ContentStatus.CLOSED) {

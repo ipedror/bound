@@ -2,7 +2,7 @@
 // ContentPopup - Draggable, resizable floating popup for content editing
 // ============================================================
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CanvasEditor } from './CanvasEditor';
 import { useAppStore } from '../store/appStore';

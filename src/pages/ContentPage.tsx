@@ -68,6 +68,7 @@ export default function ContentPage() {
     allContents,
     allLinks,
     updateContent,
+    changeContentArea,
     addPropertyToContent,
     removePropertyFromContent,
     updatePropertyInContent,
@@ -79,6 +80,7 @@ export default function ContentPage() {
       allContents: s.state.contents,
       allLinks: s.state.links,
       updateContent: s.updateContent,
+      changeContentArea: s.changeContentArea,
       addPropertyToContent: s.addPropertyToContent,
       removePropertyFromContent: s.removePropertyFromContent,
       updatePropertyInContent: s.updatePropertyInContent,
@@ -264,32 +266,49 @@ export default function ContentPage() {
               <nav style={styles.breadcrumb}>
                 <Link to="/" style={styles.breadcrumbLink}>Home</Link>
                 <span style={styles.breadcrumbSep}>/</span>
-                {area && (
+                {area ? (
                   <>
                     <Link to={`/area/${area.id}`} style={styles.breadcrumbLink}>{area.name}</Link>
                     <span style={styles.breadcrumbSep}>/</span>
                   </>
+                ) : (
+                  <>
+                    <span style={{ color: '#64748b', fontSize: '11px' }}>No area</span>
+                    <span style={styles.breadcrumbSep}>/</span>
+                  </>
                 )}
               </nav>
-              {isEditingName ? (
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onBlur={handleSaveName}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
-                  style={styles.titleInput}
-                  autoFocus
-                />
-              ) : (
-                <h1
-                  style={styles.title}
-                  onClick={() => { setEditName(content.title); setIsEditingName(true); }}
-                  title="Click to edit"
-                >
-                  {content.title}
-                </h1>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isEditingName ? (
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onBlur={handleSaveName}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
+                    style={styles.titleInput}
+                    autoFocus
+                  />
+                ) : (
+                  <h1
+                    style={styles.title}
+                    onClick={() => { setEditName(content.title); setIsEditingName(true); }}
+                    title="Click to edit"
+                  >
+                    {content.title}
+                  </h1>
+                )}
+              </div>
+              <select
+                value={content.areaId}
+                onChange={(e) => changeContentArea(content.id, e.target.value)}
+                style={{ ...styles.select, padding: '4px 8px', fontSize: '11px', marginTop: '4px', width: 'auto' }}
+              >
+                <option value="">No area</option>
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
             </Island>
           </div>
 
@@ -612,7 +631,7 @@ export default function ContentPage() {
         </div>
 
         {/* Right: Graph (only when split) */}
-        {showGraph && area && (
+        {showGraph && (
           <>
             <div
               style={styles.splitDivider}
@@ -621,7 +640,13 @@ export default function ContentPage() {
               <div style={styles.splitDividerHandle} />
             </div>
             <div style={{ ...styles.splitPanel, flex: `0 0 ${(1 - splitRatio) * 100}%` }}>
-              <GraphView areaId={area.id} height="100%" width="100%" enableLayers onNodeClick={(nodeId) => navigate(`/content/${nodeId}`)} />
+              {area ? (
+                <GraphView areaId={area.id} height="100%" width="100%" enableLayers onNodeClick={(nodeId) => navigate(`/content/${nodeId}`)} />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b', fontSize: '14px' }}>
+                  Assign an area to see the graph
+                </div>
+              )}
             </div>
           </>
         )}
@@ -731,7 +756,7 @@ const styles: Record<string, React.CSSProperties> = {
   // Right side: Properties + Links toggles
   rightPanel: {
     position: 'absolute',
-    top: '80px',
+    top: '120px',
     right: '12px',
     zIndex: 50,
     display: 'flex',

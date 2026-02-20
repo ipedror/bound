@@ -62,6 +62,8 @@ export interface CytoscapeNodeData {
   readonly levelName?: string;
   /** Whether the node's emoji/color was inherited from a parent */
   readonly isInheritedStyle?: boolean;
+  /** Custom max width for the label text box */
+  readonly labelMaxWidth?: number;
 }
 
 export interface CytoscapeNode {
@@ -104,10 +106,14 @@ export interface GraphViewState {
 
 export interface GraphFrame {
   readonly id: string;
+  /** Layer mode where this frame was created */
+  readonly createdInLayer?: 'contents' | 'areas' | 'children';
   /** 'area' frames group area-level nodes, 'content' frames group content nodes within an area */
   readonly level: 'area' | 'content';
   /** When level='content', the areaId this frame belongs to */
   readonly areaId?: string;
+  /** When created in 'children' layer mode, the parentId whose children were displayed */
+  readonly childrenParentId?: string;
   readonly title: string;
   readonly position: Position;
   readonly width: number;
@@ -122,6 +128,8 @@ export interface GraphFrame {
 
 export interface GraphFrameText {
   readonly id: string;
+  /** Layer mode where this annotation was created */
+  readonly createdInLayer?: 'contents' | 'areas' | 'children';
   readonly text: string;
   readonly x: number;
   readonly y: number;
@@ -132,6 +140,8 @@ export interface GraphFrameText {
 
 export interface GraphFrameShape {
   readonly id: string;
+  /** Layer mode where this annotation was created */
+  readonly createdInLayer?: 'contents' | 'areas' | 'children';
   readonly type: 'line' | 'arrow' | 'rect';
   readonly startX: number;
   readonly startY: number;

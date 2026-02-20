@@ -58,6 +58,8 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     groupSelectedShapes,
     ungroupSelectedShapes,
     selectGroup,
+    copyShapes,
+    pasteShapes,
     commitToStore,
   } = useCanvasEditor(contentId);
 
@@ -145,6 +147,13 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
         e.preventDefault();
         ungroupSelectedShapes();
       }
+      // Copy: Ctrl+C
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        if (selectedShapeIds.length > 0 && document.activeElement === document.body) {
+          e.preventDefault();
+          copyShapes();
+        }
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedShapeIds.length > 0 && document.activeElement === document.body) {
           e.preventDefault();
@@ -164,7 +173,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, selectedShapeIds, removeShape, setSelectedShapeIds, groupSelectedShapes, ungroupSelectedShapes]);
+  }, [undo, redo, selectedShapeIds, removeShape, setSelectedShapeIds, groupSelectedShapes, ungroupSelectedShapes, copyShapes]);
 
   // Spacebar: temporary pan (hand tool)
   useEffect(() => {
@@ -224,13 +233,20 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     return () => window.removeEventListener('mouseup', onMouseUp);
   }, [isPanning]);
 
-  // Handle paste: images from clipboard
+  // Handle paste: images from clipboard, or shape paste if no image
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
-      if (!items) return;
+      if (!items) {
+        // No clipboard data at all, try shape paste
+        pasteShapes();
+        return;
+      }
+      // Check for images first
+      let hasImage = false;
       for (const item of Array.from(items)) {
         if (item.type.startsWith('image/')) {
+          hasImage = true;
           e.preventDefault();
           const file = item.getAsFile();
           if (!file) continue;
@@ -265,10 +281,14 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
           break; // Only handle first image
         }
       }
+      // If no image was found, paste shapes from internal clipboard
+      if (!hasImage && document.activeElement === document.body) {
+        pasteShapes();
+      }
     };
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [addShape, canvasState, scale, stagePos, stageSize]);
+  }, [addShape, canvasState, scale, stagePos, stageSize, pasteShapes]);
 
   // Export canvas as image
   const exportCanvas = useCallback(
@@ -455,7 +475,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
     [canvasState.tool, getPointerPosition, isPanMode, removeShape, setSelectedShapeIds, shapes, stagePos, textInputVisible],
   );
 
-  const handleMouseMove = useCallback(() => {
+  const handleMouseMove = useCallback((e?: Konva.KonvaEventObject<MouseEvent>) => {
     if (isPanMode && panRef.current) {
       const stage = stageRef.current;
       const pointer = stage?.getPointerPosition();
@@ -470,18 +490,41 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({
       return;
     }
 
-    const pos = getPointerPosition();
-    if (!pos) return;
+    const pointerPos = getPointerPosition();
+    if (!pointerPos) return;
+    let nextX = pointerPos.x;
+    let nextY = pointerPos.y;
 
     // Update rubber-band selection rectangle
     if (selectionStart) {
-      setSelectionCurrent(pos);
+      setSelectionCurrent({ x: nextX, y: nextY });
       return;
     }
 
     if (!drawStartPos) return;
-    setCurrentDrawPos(pos);
-  }, [drawStartPos, getPointerPosition, isPanMode, selectionStart]);
+
+    // Apply Shift constraint for proportional shapes
+    if (e?.evt?.shiftKey && drawStartPos) {
+      const dx = nextX - drawStartPos.x;
+      const dy = nextY - drawStartPos.y;
+
+      if (canvasState.tool === ToolType.RECT || canvasState.tool === ToolType.ELLIPSE) {
+        // Square/circle: use the larger dimension for both
+        const maxDim = Math.max(Math.abs(dx), Math.abs(dy));
+        nextX = drawStartPos.x + maxDim * Math.sign(dx || 1);
+        nextY = drawStartPos.y + maxDim * Math.sign(dy || 1);
+      } else if (canvasState.tool === ToolType.LINE || canvasState.tool === ToolType.ARROW) {
+        // Snap to nearest 45-degree angle
+        const angle = Math.atan2(dy, dx);
+        const snapAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        nextX = drawStartPos.x + dist * Math.cos(snapAngle);
+        nextY = drawStartPos.y + dist * Math.sin(snapAngle);
+      }
+    }
+
+    setCurrentDrawPos({ x: nextX, y: nextY });
+  }, [drawStartPos, getPointerPosition, isPanMode, selectionStart, canvasState.tool]);
 
   const handleMouseUp = useCallback((e?: Konva.KonvaEventObject<MouseEvent>) => {
     if (isPanMode && panRef.current) {

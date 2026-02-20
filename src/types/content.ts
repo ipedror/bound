@@ -24,6 +24,8 @@ export interface Content {
   readonly parentId?: string;
   /** Whether this content inherits emoji/nodeColor from its parent */
   readonly inheritParentStyle?: boolean;
+  /** Max width for the label text box (in pixels). Controls text wrapping and truncation. */
+  readonly labelMaxWidth?: number;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

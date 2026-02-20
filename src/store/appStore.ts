@@ -27,6 +27,12 @@ export interface AppStoreState {
   isLoading: boolean;
   error: string | null;
   lastSyncTime: number | null;
+  /** Undo history stack (most recent last) */
+  _undoStack: AppState[];
+  /** Flag to skip recording when undoing */
+  _isUndoing: boolean;
+  /** Counter to pause undo recording (e.g. during drag) */
+  _undoPaused: number;
 }
 
 export interface AppStoreActions {
@@ -41,6 +47,7 @@ export interface AppStoreActions {
 
   // Content operations
   createContent: (areaId: string, title: string) => string;
+  changeContentArea: (contentId: string, newAreaId: string) => void;
   updateContent: (contentId: string, updates: Partial<Content>) => void;
   deleteContent: (contentId: string) => boolean;
   openContent: (contentId: string) => void;
@@ -96,6 +103,13 @@ export interface AppStoreActions {
   saveToStorage: () => Promise<void>;
   clearAll: () => Promise<void>;
 
+  // Undo
+  undo: () => void;
+  /** Pause undo recording (push state snapshot first). Call resume to re-enable. */
+  pauseUndo: () => void;
+  /** Resume undo recording after pauseUndo. */
+  resumeUndo: () => void;
+
   // Cloud operations
   loadFromFirestore: (uid: string) => Promise<void>;
   saveToFirestore: (uid: string) => Promise<void>;
@@ -115,6 +129,8 @@ const debouncedSave = (saveFunc: () => Promise<void>) => {
   }, DEBOUNCE_MS);
 };
 
+const MAX_UNDO_STACK = 50;
+
 export const useAppStore = create<AppStoreState & AppStoreActions>()(
   subscribeWithSelector((set, get) => ({
     // Initial state
@@ -122,10 +138,20 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
     isLoading: false,
     error: null,
     lastSyncTime: null,
+    _undoStack: [],
+    _isUndoing: false,
+    _undoPaused: 0,
 
     // State management
     setState: (newState: AppState) => {
-      set({ state: { ...newState, version: SCHEMA_VERSION } });
+      const { state: prevState, _isUndoing, _undoPaused, _undoStack } = get();
+      if (!_isUndoing && _undoPaused === 0) {
+        // Push previous state onto undo stack (limit size)
+        const newStack = [..._undoStack, prevState].slice(-MAX_UNDO_STACK);
+        set({ state: { ...newState, version: SCHEMA_VERSION }, _undoStack: newStack });
+      } else {
+        set({ state: { ...newState, version: SCHEMA_VERSION } });
+      }
       debouncedSave(() => get().saveToStorage());
     },
 
@@ -203,18 +229,21 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
       try {
         const content = ContentManager.createContent(areaId, title, state);
 
-        // Add content to area's contentIds
-        const area = state.areas.find((a) => a.id === areaId);
-        const updatedArea = area
-          ? { ...area, contentIds: [...area.contentIds, content.id] }
-          : null;
+        // Add content to area's contentIds (only if areaId is not empty)
+        let updatedAreas = state.areas;
+        if (areaId) {
+          const area = state.areas.find((a) => a.id === areaId);
+          if (area) {
+            updatedAreas = state.areas.map((a) =>
+              a.id === areaId ? { ...a, contentIds: [...a.contentIds, content.id] } : a,
+            );
+          }
+        }
 
         const newState = {
           ...state,
           contents: [...state.contents, content],
-          areas: updatedArea
-            ? state.areas.map((a) => (a.id === areaId ? updatedArea : a))
-            : state.areas,
+          areas: updatedAreas,
           updatedAt: Date.now(),
         };
         get().setState(newState);
@@ -223,6 +252,38 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
         set({ error: String(err) });
         throw err;
       }
+    },
+
+    changeContentArea: (contentId: string, newAreaId: string) => {
+      const { state } = get();
+      const content = state.contents.find((c) => c.id === contentId);
+      if (!content) return;
+
+      const oldAreaId = content.areaId;
+      if (oldAreaId === newAreaId) return;
+
+      // Update area contentIds: remove from old, add to new
+      let updatedAreas = state.areas;
+      if (oldAreaId || newAreaId) {
+        updatedAreas = state.areas.map((a) => {
+          if (a.id === oldAreaId) {
+            return { ...a, contentIds: a.contentIds.filter((id) => id !== contentId) };
+          }
+          if (a.id === newAreaId) {
+            return { ...a, contentIds: [...a.contentIds, contentId] };
+          }
+          return a;
+        });
+      }
+
+      const updatedContent = ContentManager.updateContent(contentId, { areaId: newAreaId }, state);
+      const newState = {
+        ...state,
+        contents: state.contents.map((c) => (c.id === contentId ? updatedContent : c)),
+        areas: updatedAreas,
+        updatedAt: Date.now(),
+      };
+      get().setState(newState);
     },
 
     updateContent: (contentId: string, updates: Partial<Content>) => {
@@ -736,6 +797,33 @@ export const useAppStore = create<AppStoreState & AppStoreActions>()(
       } catch (err) {
         set({ error: String(err) });
       }
+    },
+
+    // Undo
+    undo: () => {
+      const { _undoStack } = get();
+      if (_undoStack.length === 0) return;
+      const newStack = [..._undoStack];
+      const prevState = newStack.pop()!;
+      set({ _isUndoing: true, _undoStack: newStack });
+      get().setState(prevState);
+      set({ _isUndoing: false });
+    },
+
+    pauseUndo: () => {
+      const { _undoPaused, state, _undoStack } = get();
+      if (_undoPaused === 0) {
+        // Snapshot current state before pausing so undo can restore it
+        const newStack = [..._undoStack, state].slice(-MAX_UNDO_STACK);
+        set({ _undoPaused: _undoPaused + 1, _undoStack: newStack });
+      } else {
+        set({ _undoPaused: _undoPaused + 1 });
+      }
+    },
+
+    resumeUndo: () => {
+      const { _undoPaused } = get();
+      set({ _undoPaused: Math.max(0, _undoPaused - 1) });
     },
   })),
 );

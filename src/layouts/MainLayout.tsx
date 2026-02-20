@@ -28,6 +28,23 @@ export default function MainLayout() {
     })),
   );
 
+  const undo = useAppStore((s) => s.undo);
+
+  // Global Ctrl+Z undo handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        // Don't undo when typing in inputs/textareas
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo]);
+
   // Cloud sync
   const { onSyncStatusChange, forceSync, isCloudEnabled } = useCloudSync();
 

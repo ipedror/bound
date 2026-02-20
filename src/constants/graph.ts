@@ -66,6 +66,14 @@ export const CYTOSCAPE_STYLE = [
       'text-max-width': '92px',
     },
   },
+  // Content node with custom label width
+  {
+    selector: 'node[nodeType = "content"][labelMaxWidth]',
+    style: {
+      'text-max-width': 'data(labelMaxWidth)',
+      'text-overflow-wrap': 'anywhere',
+    },
+  },
   // Node with emoji - show emoji inside via background-image SVG
   {
     selector: 'node[emojiImage]',
@@ -198,16 +206,11 @@ export const CYTOSCAPE_STYLE = [
     selector: 'node[nodeType = "frame"]',
     style: {
       shape: 'round-rectangle',
-      'background-opacity': 0.12,
+      'background-opacity': 0.08,
       'border-width': 2,
       'border-style': 'dashed',
-      'border-opacity': 0.6,
-      'text-valign': 'top',
-      'text-halign': 'center',
-      'text-margin-y': -20,
-      'font-size': 13,
-      'font-weight': 'bold',
-      'text-wrap': 'none',
+      'border-opacity': 0.4,
+      label: '',
       'z-index': 0,
       'z-index-compare': 'manual',
     },

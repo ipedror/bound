@@ -60,6 +60,10 @@ export interface UseCanvasEditorReturn {
   ungroupSelectedShapes: () => void;
   selectGroup: (groupId: string) => void;
 
+  // Clipboard operations
+  copyShapes: () => void;
+  pasteShapes: () => void;
+
   // Commit changes to store
   commitToStore: () => void;
 }
@@ -315,6 +319,60 @@ export function useCanvasEditor(
     [localShapes, setSelectedShapeIds],
   );
 
+  // --- Clipboard (copy/paste) ---
+  const clipboardRef = useRef<Shape[]>([]);
+  const pasteCountRef = useRef(0);
+
+  const copyShapes = useCallback(() => {
+    if (selectedShapeIds.length === 0) return;
+    clipboardRef.current = localShapes.filter((s) => selectedShapeIds.includes(s.id));
+    pasteCountRef.current = 0;
+  }, [selectedShapeIds, localShapes]);
+
+  const pasteShapes = useCallback(() => {
+    if (clipboardRef.current.length === 0) return;
+    pasteCountRef.current += 1;
+    const offset = 20 * pasteCountRef.current;
+
+    // Generate new IDs and a group mapping for pasted shapes
+    const idMap = new Map<string, string>();
+    const newShapes = clipboardRef.current.map((s) => {
+      const newId = generateId();
+      idMap.set(s.id, newId);
+      return {
+        ...s,
+        id: newId,
+        position: { x: s.position.x + offset, y: s.position.y + offset },
+        createdAt: Date.now(),
+      };
+    });
+
+    // Remap groupIds so pasted shapes stay grouped together
+    const remapped = newShapes.map((s) => {
+      if (s.groupId && idMap.has(s.groupId)) {
+        return { ...s, groupId: idMap.get(s.groupId)! };
+      }
+      // If all original shapes shared the same groupId, remap it to a new one
+      if (s.groupId) {
+        const origGroup = clipboardRef.current.find((c) => c.groupId === s.groupId);
+        if (origGroup) {
+          // Use a deterministic new group id based on original
+          if (!idMap.has(`group:${s.groupId}`)) {
+            idMap.set(`group:${s.groupId}`, generateId());
+          }
+          return { ...s, groupId: idMap.get(`group:${s.groupId}`)! };
+        }
+      }
+      return s;
+    });
+
+    const updated = [...localShapes, ...remapped];
+    setLocalShapes(updated);
+    setHistory((h) => CanvasUndoRedoManager.push(updated, h));
+    setSelectedShapeIds(remapped.map((s) => s.id));
+    pendingCommit.current = true;
+  }, [localShapes]);
+
   // Commit changes to store (debounced externally or called manually)
   const commitToStore = useCallback(() => {
     if (!contentId || !pendingCommit.current) return;
@@ -391,6 +449,8 @@ export function useCanvasEditor(
     groupSelectedShapes,
     ungroupSelectedShapes,
     selectGroup,
+    copyShapes,
+    pasteShapes,
     commitToStore,
   };
 }

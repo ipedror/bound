@@ -198,6 +198,7 @@ export class NodeFactory {
         hierarchyDepth: hierarchyDepth ?? 0,
         levelName,
         isInheritedStyle: resolved.isInherited || undefined,
+        labelMaxWidth: content.labelMaxWidth,
       },
       position,
     };

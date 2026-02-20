@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useRef, useEffect, useCallback, useState, useMemo, memo } from 'react';
-import cytoscape, { type Core, type EventObject, type LayoutOptions } from 'cytoscape';
+import cytoscape, { type Core, type EventObject, type LayoutOptions, type NodeSingular } from 'cytoscape';
 // @ts-expect-error - cytoscape-cose-bilkent has no type declarations
 import coseBilkent from 'cytoscape-cose-bilkent';
 import { useGraphView } from '../hooks/useGraphView';
@@ -67,9 +67,11 @@ export const GraphView = memo(function GraphView({
   const cyRef = useRef<Core | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeTool, setActiveTool] = useState<GraphTool>('select');
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [showNodeEditor, setShowNodeEditor] = useState(false);
   const [nodeEmoji, setNodeEmoji] = useState('');
   const [nodeColor, setNodeColor] = useState(GRAPH_COLORS.nodeDefault);
+  const [nodeLabelWidth, setNodeLabelWidth] = useState(92);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [zoomInputValue, setZoomInputValue] = useState('100');
   const [isEditingZoom, setIsEditingZoom] = useState(false);
@@ -117,12 +119,14 @@ export const GraphView = memo(function GraphView({
   const [createName, setCreateName] = useState('');
   const [createAreaId, setCreateAreaId] = useState<string>('');
   const [createModelPos, setCreateModelPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [overlayRefreshTick, setOverlayRefreshTick] = useState(0);
 
   const {
-    updateContent, allContents, createLink, deleteLink, updateLink, state: appState,
+    updateContent, allContents, createLink, deleteLink, updateLink, state: appState, setState: setAppState,
     areas, addGraphFrame, updateGraphFrame, deleteGraphFrame,
     updateAreaNodePosition, hierarchyLevelConfigs, setHierarchyLevelConfigs, updateHierarchyLevelConfig,
     createArea, createContent, updateNodePosition: storeUpdateNodePosition,
+    pauseUndo, resumeUndo,
   } = useAppStore(
     useShallow((s) => ({
       updateContent: s.updateContent,
@@ -131,6 +135,7 @@ export const GraphView = memo(function GraphView({
       deleteLink: s.deleteLink,
       updateLink: s.updateLink,
       state: s.state,
+      setState: s.setState,
       areas: s.state.areas,
       addGraphFrame: s.addGraphFrame,
       updateGraphFrame: s.updateGraphFrame,
@@ -142,6 +147,8 @@ export const GraphView = memo(function GraphView({
       createArea: s.createArea,
       createContent: s.createContent,
       updateNodePosition: s.updateNodePosition,
+      pauseUndo: s.pauseUndo,
+      resumeUndo: s.resumeUndo,
     })),
   );
 
@@ -203,9 +210,25 @@ export const GraphView = memo(function GraphView({
   // Build frame nodes for Cytoscape
   const frameLevel = (enableLayers && layerMode === 'areas' && !drillAreaId) ? 'area' : 'content';
   const frameAreaId = drillAreaId ?? areaId;
+  const currentLayerMode: 'contents' | 'areas' | 'children' = enableLayers ? layerMode : 'contents';
+  const resolveFrameCreatedLayer = (frame: GraphFrame): 'contents' | 'areas' | 'children' => {
+    if (frame.createdInLayer) return frame.createdInLayer;
+    if (frame.childrenParentId) return 'children';
+    if (frame.level === 'area') return 'areas';
+    return 'contents';
+  };
   const graphFrames: GraphFrame[] = (appState.graphFrames ?? []).filter((f) => {
+    // Strict layer isolation: a frame only appears in the layer where it was created
+    if (resolveFrameCreatedLayer(f) !== currentLayerMode) return false;
     if (f.level !== frameLevel) return false;
-    if (frameLevel === 'content' && f.areaId && frameAreaId && f.areaId !== frameAreaId) return false;
+    if (frameLevel === 'content' && (f.areaId || frameAreaId) && f.areaId !== frameAreaId) return false;
+    // In children layer mode, only show frames created in that specific children context
+    if (enableLayers && layerMode === 'children') {
+      if (f.childrenParentId !== childrenParentId) return false;
+    } else {
+      // In non-children modes, hide frames that belong to a children context
+      if (f.childrenParentId) return false;
+    }
     return true;
   });
   const frameNodes: CytoscapeNode[] = graphFrames.map((f) => ({
@@ -281,6 +304,8 @@ export const GraphView = memo(function GraphView({
   onEdgeClickRef.current = onEdgeClick;
   const onBackgroundClickRef = useRef(onBackgroundClick);
   onBackgroundClickRef.current = onBackgroundClick;
+  const isSelectionModeRef = useRef(isSelectionMode);
+  isSelectionModeRef.current = isSelectionMode;
   const updateNodePositionRef = useRef(updateNodePosition);
   updateNodePositionRef.current = updateNodePosition;
   const setSelectedNodeIdRef = useRef(setSelectedNodeId);
@@ -305,20 +330,52 @@ export const GraphView = memo(function GraphView({
   updateAreaNodePositionRef.current = updateAreaNodePosition;
   const updateGraphFrameRef = useRef(updateGraphFrame);
   updateGraphFrameRef.current = updateGraphFrame;
+  const pauseUndoRef = useRef(pauseUndo);
+  pauseUndoRef.current = pauseUndo;
+  const resumeUndoRef = useRef(resumeUndo);
+  resumeUndoRef.current = resumeUndo;
   // Track frame drag: which child nodes move with it
   const frameDragChildrenRef = useRef<{ id: string; offsetX: number; offsetY: number }[]>([]);
   const frameDragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const frameDragPersistAtRef = useRef(0);
+  const overlayRefreshRafRef = useRef<number | null>(null);
+  const requestOverlayRefresh = useCallback(() => {
+    if (overlayRefreshRafRef.current !== null) return;
+    overlayRefreshRafRef.current = requestAnimationFrame(() => {
+      overlayRefreshRafRef.current = null;
+      setOverlayRefreshTick((n) => n + 1);
+    });
+  }, []);
+  const requestOverlayRefreshRef = useRef(requestOverlayRefresh);
+  requestOverlayRefreshRef.current = requestOverlayRefresh;
+  // Group drag selection state
+  const groupDragAnchorIdRef = useRef<string | null>(null);
+  const groupDragOffsetsRef = useRef<{ id: string; offsetX: number; offsetY: number }[]>([]);
+  const isGroupDraggingRef = useRef(false);
   const layerModeRef = useRef(layerMode);
   layerModeRef.current = layerMode;
   const drillAreaIdRef = useRef(drillAreaId);
   drillAreaIdRef.current = drillAreaId;
   const enableLayersRef = useRef(enableLayers);
   enableLayersRef.current = enableLayers;
+  const areaIdRef = useRef(areaId);
+  areaIdRef.current = areaId;
+  const childrenParentIdRef = useRef(childrenParentId);
+  childrenParentIdRef.current = childrenParentId;
   const setDrillAreaIdRef = useRef(setDrillAreaId);
   setDrillAreaIdRef.current = setDrillAreaId;
   // Track drag-to-connect source and its original position
   const dragSourceRef = useRef<string | null>(null);
   const dragSourcePositionRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (overlayRefreshRafRef.current !== null) {
+        cancelAnimationFrame(overlayRefreshRafRef.current);
+        overlayRefreshRafRef.current = null;
+      }
+    };
+  }, []);
 
   // Create Cytoscape instance ONCE (on mount)
   useEffect(() => {
@@ -331,7 +388,7 @@ export const GraphView = memo(function GraphView({
       style: CYTOSCAPE_STYLE as any,
       layout: { name: 'preset', animate: false, padding: 30 } as LayoutOptions,
       wheelSensitivity: 0.3,
-      boxSelectionEnabled: false,
+      boxSelectionEnabled: true,
       minZoom: 0.1,
       maxZoom: 5,
       userPanningEnabled: true,
@@ -345,6 +402,25 @@ export const GraphView = memo(function GraphView({
     cy.on('click', 'node', (evt: EventObject) => {
       const nodeId = evt.target.id() as string;
       const nodeType = evt.target.data('nodeType') as string | undefined;
+      const originalEvent = (evt.originalEvent ?? evt) as MouseEvent;
+      const isShift = !!originalEvent?.shiftKey;
+      const isMultiSelect = isShift || (activeToolRef.current === 'select' && isSelectionModeRef.current);
+
+      // Multi-selection in select tool (Shift+click)
+      if (activeToolRef.current === 'select' && isMultiSelect) {
+        if (evt.target.selected()) {
+          evt.target.unselect();
+        } else {
+          evt.target.select();
+        }
+        return;
+      }
+
+      // Single selection in select tool
+      if (activeToolRef.current === 'select') {
+        cy.$('node').unselect();
+        evt.target.select();
+      }
 
       // Frame nodes: select for editing
       if (nodeType === 'frame') {
@@ -402,9 +478,36 @@ export const GraphView = memo(function GraphView({
         dragSourcePositionRef.current = { ...evt.target.position() };
       }
 
+      // Group drag prep: dragging a selected node drags all selected nodes together
+      if (activeToolRef.current === 'select') {
+        const anchorId = evt.target.id() as string;
+        const selected = cy.nodes(':selected').filter((n) => n.id() !== anchorId).toArray() as NodeSingular[];
+        if (evt.target.selected() && selected.length > 0) {
+          const anchorPos = evt.target.position();
+          groupDragAnchorIdRef.current = anchorId;
+          groupDragOffsetsRef.current = selected.map((n) => {
+            const p = n.position();
+            return {
+              id: n.id(),
+              offsetX: p.x - anchorPos.x,
+              offsetY: p.y - anchorPos.y,
+            };
+          });
+          isGroupDraggingRef.current = true;
+        } else {
+          groupDragAnchorIdRef.current = null;
+          groupDragOffsetsRef.current = [];
+          isGroupDraggingRef.current = false;
+        }
+      }
+
       // Frame grab: find child nodes inside frame bounds and track offsets
       const nodeType = evt.target.data('nodeType') as string | undefined;
-      if (nodeType === 'frame' && activeToolRef.current === 'select') {
+      if (nodeType === 'frame' && activeToolRef.current === 'select' && !isGroupDraggingRef.current) {
+        // Pause undo for the whole frame drag session (resumed on free)
+        pauseUndoRef.current();
+        frameDragPersistAtRef.current = 0;
+
         const framePos = evt.target.position();
         const fw = evt.target.width();
         const fh = evt.target.height();
@@ -436,6 +539,26 @@ export const GraphView = memo(function GraphView({
       if (activeToolRef.current !== 'select') return;
       if (frameDragChildrenRef.current.length === 0) return;
       const framePos = evt.target.position();
+
+      // Group drag move: keep selected nodes together
+      if (isGroupDraggingRef.current && groupDragAnchorIdRef.current === evt.target.id()) {
+        groupDragOffsetsRef.current.forEach(({ id, offsetX, offsetY }) => {
+          const member = cy.$id(id);
+          if (member.length) {
+            member.position({ x: framePos.x + offsetX, y: framePos.y + offsetY });
+          }
+        });
+        const anchorIsFrame = (evt.target.data('nodeType') as string | undefined) === 'frame';
+        const membersIncludeFrame = groupDragOffsetsRef.current.some(({ id }) => {
+          const n = cy.$id(id);
+          return n.length > 0 && (n.data('nodeType') as string | undefined) === 'frame';
+        });
+        if (anchorIsFrame || membersIncludeFrame) {
+          requestOverlayRefreshRef.current();
+        }
+        return;
+      }
+
       cy.startBatch();
       frameDragChildrenRef.current.forEach(({ id, offsetX, offsetY }) => {
         const child = cy.$id(id);
@@ -444,12 +567,80 @@ export const GraphView = memo(function GraphView({
         }
       });
       cy.endBatch();
+      requestOverlayRefreshRef.current();
+
+      // Persist during drag (throttled) to avoid stale state when switching layers immediately
+      const now = Date.now();
+      if (now - frameDragPersistAtRef.current < 40) return;
+      frameDragPersistAtRef.current = now;
+
+      const frameId = (evt.target.id() as string).replace('frame:', '');
+      const fw = evt.target.width();
+      const fh = evt.target.height();
+
+      updateGraphFrameRef.current(frameId, {
+        position: { x: framePos.x - fw / 2, y: framePos.y - fh / 2 },
+      });
+
+      frameDragChildrenRef.current.forEach(({ id }) => {
+        const child = cy.getElementById(id);
+        if (!child.length) return;
+        const childPos = child.position();
+        const childNodeType = child.data('nodeType') as string | undefined;
+        if (childNodeType === 'area') {
+          const realAreaId = id.replace('area:', '');
+          updateAreaNodePositionRef.current(realAreaId, childPos.x, childPos.y);
+        } else {
+          updateNodePositionRef.current(id, childPos);
+        }
+      });
     });
 
     // Node drag end handler - persist position OR create link via drag
     cy.on('free', 'node', (evt: EventObject) => {
       const nodeId = evt.target.id();
       const pos = evt.target.position();
+
+      // End group drag state
+      if (isGroupDraggingRef.current && groupDragAnchorIdRef.current === nodeId) {
+        pauseUndoRef.current();
+        // Persist anchor
+        const anchorType = evt.target.data('nodeType') as string | undefined;
+        if (anchorType === 'frame') {
+          const fw = evt.target.width();
+          const fh = evt.target.height();
+          updateGraphFrameRef.current(nodeId.replace('frame:', ''), {
+            position: { x: pos.x - fw / 2, y: pos.y - fh / 2 },
+          });
+        } else if (anchorType === 'area') {
+          updateAreaNodePositionRef.current(nodeId.replace('area:', ''), pos.x, pos.y);
+        } else {
+          updateNodePositionRef.current(nodeId, pos);
+        }
+        // Persist members
+        groupDragOffsetsRef.current.forEach(({ id }) => {
+          const member = cy.getElementById(id);
+          if (!member.length) return;
+          const mp = member.position();
+          const memberType = member.data('nodeType') as string | undefined;
+          if (memberType === 'frame') {
+            const fw = member.width();
+            const fh = member.height();
+            updateGraphFrameRef.current(id.replace('frame:', ''), {
+              position: { x: mp.x - fw / 2, y: mp.y - fh / 2 },
+            });
+          } else if (memberType === 'area') {
+            updateAreaNodePositionRef.current(id.replace('area:', ''), mp.x, mp.y);
+          } else {
+            updateNodePositionRef.current(id, mp);
+          }
+        });
+        resumeUndoRef.current();
+        groupDragAnchorIdRef.current = null;
+        groupDragOffsetsRef.current = [];
+        isGroupDraggingRef.current = false;
+        return;
+      }
 
       // Check if this was a drag-to-connect in arrow mode
       if (activeToolRef.current === 'arrow' && dragSourceRef.current) {
@@ -512,8 +703,10 @@ export const GraphView = memo(function GraphView({
             }
           }
         });
+        resumeUndoRef.current();
         frameDragChildrenRef.current = [];
         frameDragStartPosRef.current = null;
+        frameDragPersistAtRef.current = 0;
         return;
       }
 
@@ -531,6 +724,7 @@ export const GraphView = memo(function GraphView({
     cy.on('click', (evt: EventObject) => {
       if (evt.target === cy) {
         setSelectedNodeIdRef.current(undefined);
+        cy.$('node').unselect();
         setSelectedEdgeIdRef.current(undefined);
         setShowNodeEditor(false);
         setShowEdgeEditor(false);
@@ -671,6 +865,8 @@ export const GraphView = memo(function GraphView({
     const cy = cyRef.current;
     if (!cy) return;
 
+    cy.boxSelectionEnabled(activeTool === 'select');
+
     if (activeTool === 'hand') {
       cy.autoungrabify(true);
       cy.userPanningEnabled(true);
@@ -723,11 +919,15 @@ export const GraphView = memo(function GraphView({
       const h = Math.abs(endPt.y - frameStartRef.current.y);
 
       if (w > 30 && h > 30) {
+        const createdInLayer: 'contents' | 'areas' | 'children' =
+          (enableLayersRef.current ? layerModeRef.current : 'contents');
         const level = (enableLayersRef.current && layerModeRef.current === 'areas' && !drillAreaIdRef.current) ? 'area' : 'content';
         const frame: GraphFrame = {
           id: generateId(),
+          createdInLayer,
           level: level as 'area' | 'content',
-          areaId: drillAreaIdRef.current ?? undefined,
+          areaId: drillAreaIdRef.current ?? areaIdRef.current ?? undefined,
+          childrenParentId: (enableLayersRef.current && layerModeRef.current === 'children') ? childrenParentIdRef.current : undefined,
           title: 'Frame',
           position: { x, y },
           width: w,
@@ -794,6 +994,7 @@ export const GraphView = memo(function GraphView({
       if (content) {
         setNodeEmoji(content.emoji ?? '');
         setNodeColor((content.nodeColor ?? GRAPH_COLORS.nodeDefault) as typeof GRAPH_COLORS.nodeDefault);
+        setNodeLabelWidth(content.labelMaxWidth ?? 92);
         setShowNodeEditor(true);
       }
     } else {
@@ -849,6 +1050,23 @@ export const GraphView = memo(function GraphView({
     setNodeColor(color as typeof GRAPH_COLORS.nodeDefault);
     if (selectedNodeId) {
       updateContent(selectedNodeId, { nodeColor: color });
+    }
+  }, [selectedNodeId, updateContent]);
+
+  // Save label max width to content
+  const handleLabelWidthChange = useCallback((width: number) => {
+    setNodeLabelWidth(width);
+    if (selectedNodeId) {
+      // Store undefined when using default (92px) to keep data clean
+      updateContent(selectedNodeId, { labelMaxWidth: width === 92 ? undefined : width });
+      // Apply directly to Cytoscape for immediate visual feedback
+      const cy = cyRef.current;
+      if (cy) {
+        const cyNode = cy.$id(selectedNodeId);
+        if (cyNode.length) {
+          cyNode.data('labelMaxWidth', width);
+        }
+      }
     }
   }, [selectedNodeId, updateContent]);
 
@@ -942,21 +1160,105 @@ export const GraphView = memo(function GraphView({
     resetView();
   }, [resetView]);
 
+  // Persist current visible layout (frames + nodes) before context switches (layer/drill)
+  const persistVisibleLayout = useCallback(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    const store = useAppStore.getState();
+    const current = store.state;
+    const nextAreas = [...current.areas];
+    const nextContents = [...current.contents];
+    const nextFrames = [...(current.graphFrames ?? [])];
+
+    const areaIndexById = new Map(nextAreas.map((a, i) => [a.id, i]));
+    const contentIndexById = new Map(nextContents.map((c, i) => [c.id, i]));
+    const frameIndexById = new Map(nextFrames.map((f, i) => [f.id, i]));
+
+    let changed = false;
+
+    // 1) Visible frame geometry from Cytoscape
+    for (const frame of graphFrames) {
+      const frameNode = cy.getElementById(`frame:${frame.id}`);
+      if (!frameNode || frameNode.length === 0) continue;
+      const idx = frameIndexById.get(frame.id);
+      if (idx === undefined) continue;
+
+      const pos = frameNode.position();
+      const width = frameNode.width();
+      const height = frameNode.height();
+      const nextX = pos.x - width / 2;
+      const nextY = pos.y - height / 2;
+      const old = nextFrames[idx];
+
+      const moved = Math.abs(nextX - old.position.x) > 0.5 || Math.abs(nextY - old.position.y) > 0.5;
+      const resized = Math.abs(width - old.width) > 0.5 || Math.abs(height - old.height) > 0.5;
+      if (moved || resized) {
+        nextFrames[idx] = {
+          ...old,
+          position: { x: nextX, y: nextY },
+          width,
+          height,
+          updatedAt: Date.now(),
+        };
+        changed = true;
+      }
+    }
+
+    // 2) Visible non-frame node positions
+    cy.nodes().forEach((node) => {
+      const nodeType = node.data('nodeType') as string | undefined;
+      if (nodeType === 'frame') return;
+
+      const pos = node.position();
+      if (nodeType === 'area') {
+        const realAreaId = node.id().replace('area:', '');
+        const idx = areaIndexById.get(realAreaId);
+        if (idx === undefined) return;
+        const old = nextAreas[idx];
+        if (!old.nodePosition || Math.abs(old.nodePosition.x - pos.x) > 0.5 || Math.abs(old.nodePosition.y - pos.y) > 0.5) {
+          nextAreas[idx] = { ...old, nodePosition: { x: pos.x, y: pos.y }, updatedAt: Date.now() };
+          changed = true;
+        }
+        return;
+      }
+
+      const idx = contentIndexById.get(node.id());
+      if (idx === undefined) return;
+      const old = nextContents[idx];
+      if (!old.nodePosition || Math.abs(old.nodePosition.x - pos.x) > 0.5 || Math.abs(old.nodePosition.y - pos.y) > 0.5) {
+        nextContents[idx] = { ...old, nodePosition: { x: pos.x, y: pos.y }, updatedAt: Date.now() };
+        changed = true;
+      }
+    });
+
+    if (!changed) return;
+    setAppState({
+      ...current,
+      areas: nextAreas,
+      contents: nextContents,
+      graphFrames: nextFrames,
+      updatedAt: Date.now(),
+    });
+  }, [graphFrames, setAppState]);
+
   // Layer mode change
   const handleChangeLayerMode = useCallback((mode: GraphLayerMode) => {
+    persistVisibleLayout();
     setLayerMode(mode);
     setDrillAreaId(undefined);
     setChildrenParentId(undefined);
     setSelectedNodeId(undefined);
     setShowNodeEditor(false);
-  }, [setSelectedNodeId]);
+  }, [setSelectedNodeId, persistVisibleLayout]);
 
   // Back to area view from drill-down
   const handleBackToAreas = useCallback(() => {
+    persistVisibleLayout();
     setDrillAreaId(undefined);
     setSelectedNodeId(undefined);
     setShowNodeEditor(false);
-  }, [setSelectedNodeId]);
+  }, [setSelectedNodeId, persistVisibleLayout]);
 
   // Frame editor handlers
   const handleSaveFrame = useCallback(() => {
@@ -979,13 +1281,111 @@ export const GraphView = memo(function GraphView({
     setEditingFrameId(undefined);
   }, [editingFrameId, deleteGraphFrame]);
 
+  // Frame alignment: get content nodes inside a frame
+  const getNodesInFrame = useCallback((frameId: string) => {
+    const cy = cyRef.current;
+    if (!cy) return [];
+    const frameNode = cy.getElementById(`frame:${frameId}`);
+    if (!frameNode || frameNode.length === 0) return [];
+    const fp = frameNode.position();
+    const fw = frameNode.width();
+    const fh = frameNode.height();
+    const left = fp.x - fw / 2;
+    const right = fp.x + fw / 2;
+    const top = fp.y - fh / 2;
+    const bottom = fp.y + fh / 2;
+    const inside: { id: string; contentId: string; x: number; y: number }[] = [];
+    cy.nodes().forEach((n) => {
+      if (n.data('nodeType') === 'frame') return;
+      const p = n.position();
+      if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) {
+        inside.push({ id: n.id(), contentId: n.data('contentId'), x: p.x, y: p.y });
+      }
+    });
+    return inside;
+  }, []);
+
+  const handleAlignCenterH = useCallback(() => {
+    if (!editingFrameId) return;
+    const cy = cyRef.current;
+    if (!cy) return;
+    const frameNode = cy.getElementById(`frame:${editingFrameId}`);
+    if (!frameNode || frameNode.length === 0) return;
+    const centerX = frameNode.position().x;
+    const nodes = getNodesInFrame(editingFrameId);
+    nodes.forEach((n) => {
+      const cyNode = cy.$id(n.id);
+      cyNode.position({ x: centerX, y: n.y });
+      if (n.contentId) storeUpdateNodePosition(n.contentId, centerX, n.y);
+    });
+  }, [editingFrameId, getNodesInFrame, storeUpdateNodePosition]);
+
+  const handleAlignCenterV = useCallback(() => {
+    if (!editingFrameId) return;
+    const cy = cyRef.current;
+    if (!cy) return;
+    const frameNode = cy.getElementById(`frame:${editingFrameId}`);
+    if (!frameNode || frameNode.length === 0) return;
+    const centerY = frameNode.position().y;
+    const nodes = getNodesInFrame(editingFrameId);
+    nodes.forEach((n) => {
+      const cyNode = cy.$id(n.id);
+      cyNode.position({ x: n.x, y: centerY });
+      if (n.contentId) storeUpdateNodePosition(n.contentId, n.x, centerY);
+    });
+  }, [editingFrameId, getNodesInFrame, storeUpdateNodePosition]);
+
+  const handleDistributeH = useCallback(() => {
+    if (!editingFrameId) return;
+    const cy = cyRef.current;
+    if (!cy) return;
+    const frameNode = cy.getElementById(`frame:${editingFrameId}`);
+    if (!frameNode || frameNode.length === 0) return;
+    const fw = frameNode.width();
+    const left = frameNode.position().x - fw / 2;
+    const nodes = getNodesInFrame(editingFrameId);
+    if (nodes.length < 2) return;
+    nodes.sort((a, b) => a.x - b.x);
+    const padding = 30;
+    const spacing = (fw - padding * 2) / (nodes.length - 1);
+    nodes.forEach((n, i) => {
+      const newX = left + padding + i * spacing;
+      const cyNode = cy.$id(n.id);
+      cyNode.position({ x: newX, y: n.y });
+      if (n.contentId) storeUpdateNodePosition(n.contentId, newX, n.y);
+    });
+  }, [editingFrameId, getNodesInFrame, storeUpdateNodePosition]);
+
+  const handleDistributeV = useCallback(() => {
+    if (!editingFrameId) return;
+    const cy = cyRef.current;
+    if (!cy) return;
+    const frameNode = cy.getElementById(`frame:${editingFrameId}`);
+    if (!frameNode || frameNode.length === 0) return;
+    const fh = frameNode.height();
+    const top = frameNode.position().y - fh / 2;
+    const nodes = getNodesInFrame(editingFrameId);
+    if (nodes.length < 2) return;
+    nodes.sort((a, b) => a.y - b.y);
+    const padding = 30;
+    const spacing = (fh - padding * 2) / (nodes.length - 1);
+    nodes.forEach((n, i) => {
+      const newY = top + padding + i * spacing;
+      const cyNode = cy.$id(n.id);
+      cyNode.position({ x: n.x, y: newY });
+      if (n.contentId) storeUpdateNodePosition(n.contentId, n.x, newY);
+    });
+  }, [editingFrameId, getNodesInFrame, storeUpdateNodePosition]);
+
   // Frame annotation handlers
   const handleAddFrameText = useCallback(() => {
     if (!editingFrameId) return;
     const frame = graphFrames.find((f) => f.id === editingFrameId);
     if (!frame) return;
+    const createdInLayer = frame.createdInLayer ?? currentLayerMode;
     const newText: GraphFrameText = {
       id: generateId(),
+      createdInLayer,
       text: 'Text',
       x: frame.width / 2 - 20,
       y: frame.height / 2,
@@ -994,7 +1394,7 @@ export const GraphView = memo(function GraphView({
     };
     const existing = frame.texts ?? [];
     updateGraphFrame(editingFrameId, { texts: [...existing, newText] });
-  }, [editingFrameId, graphFrames, updateGraphFrame]);
+  }, [editingFrameId, graphFrames, updateGraphFrame, currentLayerMode]);
 
   const handleAddFrameShape = useCallback((type: 'line' | 'arrow' | 'rect') => {
     if (!editingFrameId) return;
@@ -1002,8 +1402,10 @@ export const GraphView = memo(function GraphView({
     if (!frame) return;
     const cx = frame.width / 2;
     const cy = frame.height / 2;
+    const createdInLayer = frame.createdInLayer ?? currentLayerMode;
     const newShape: GraphFrameShape = {
       id: generateId(),
+      createdInLayer,
       type,
       startX: cx - 40,
       startY: cy - (type === 'rect' ? 20 : 0),
@@ -1014,7 +1416,7 @@ export const GraphView = memo(function GraphView({
     };
     const existing = frame.shapes ?? [];
     updateGraphFrame(editingFrameId, { shapes: [...existing, newShape] });
-  }, [editingFrameId, graphFrames, updateGraphFrame]);
+  }, [editingFrameId, graphFrames, updateGraphFrame, currentLayerMode]);
 
   const handleUpdateFrameText = useCallback((frameId: string, textId: string, updates: Partial<GraphFrameText>) => {
     const frame = graphFrames.find((f) => f.id === frameId);
@@ -1043,6 +1445,26 @@ export const GraphView = memo(function GraphView({
     const shapes = (frame.shapes ?? []).filter((s) => s.id !== shapeId);
     updateGraphFrame(frameId, { shapes });
   }, [graphFrames, updateGraphFrame]);
+
+  const handleAddFrameAnnotationText = useCallback((frameId: string, text: GraphFrameText) => {
+    const frame = graphFrames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const textWithLayer: GraphFrameText = {
+      ...text,
+      createdInLayer: text.createdInLayer ?? frame.createdInLayer ?? currentLayerMode,
+    };
+    updateGraphFrame(frameId, { texts: [...(frame.texts ?? []), textWithLayer] });
+  }, [graphFrames, updateGraphFrame, currentLayerMode]);
+
+  const handleAddFrameAnnotationShape = useCallback((frameId: string, shape: GraphFrameShape) => {
+    const frame = graphFrames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const shapeWithLayer: GraphFrameShape = {
+      ...shape,
+      createdInLayer: shape.createdInLayer ?? frame.createdInLayer ?? currentLayerMode,
+    };
+    updateGraphFrame(frameId, { shapes: [...(frame.shapes ?? []), shapeWithLayer] });
+  }, [graphFrames, updateGraphFrame, currentLayerMode]);
 
   // Escape key to cancel connecting or switch to select
   useEffect(() => {
@@ -1080,11 +1502,11 @@ export const GraphView = memo(function GraphView({
     if (!contextMenu) return;
     setCreateMode(mode);
     setCreateName('');
-    setCreateAreaId(areas.length > 0 ? areas[0].id : '');
+    setCreateAreaId(areaId || '');
     setCreateModelPos({ x: contextMenu.modelX, y: contextMenu.modelY });
     setShowCreateModal(true);
     setContextMenu(null);
-  }, [contextMenu, areas]);
+  }, [contextMenu, areaId]);
 
   // Handle creating area or content from modal
   const handleCreateFromModal = useCallback(() => {
@@ -1094,7 +1516,6 @@ export const GraphView = memo(function GraphView({
       // Set area node position to where user right-clicked
       updateAreaNodePosition(areaId, createModelPos.x, createModelPos.y);
     } else {
-      if (!createAreaId) return;
       const contentId = createContent(createAreaId, createName.trim());
       // Set content node position to where user right-clicked
       storeUpdateNodePosition(contentId, createModelPos.x, createModelPos.y);
@@ -1147,10 +1568,27 @@ export const GraphView = memo(function GraphView({
         <FrameAnnotationsOverlay
           cyRef={cyRef}
           frames={graphFrames}
+          refreshTick={overlayRefreshTick}
           onUpdateText={handleUpdateFrameText}
           onDeleteText={handleDeleteFrameText}
           onUpdateShape={handleUpdateFrameShape}
           onDeleteShape={handleDeleteFrameShape}
+          onAddText={handleAddFrameAnnotationText}
+          onAddShape={handleAddFrameAnnotationShape}
+          onFrameClick={(frameId) => {
+            const frame = graphFrames.find((f) => f.id === frameId);
+            if (frame) {
+              setEditingFrameId(frame.id);
+              setFrameTitle(frame.title);
+              setFrameBgColor(frame.backgroundColor ?? 'rgba(56, 189, 248, 0.08)');
+              setFrameBorderColor(frame.borderColor ?? 'rgba(56, 189, 248, 0.4)');
+              setShowFrameEditor(true);
+              setShowNodeEditor(false);
+            }
+          }}
+          onUpdateFrame={(frameId, updates) => {
+            updateGraphFrame(frameId, updates);
+          }}
         />
       )}
 
@@ -1185,6 +1623,23 @@ export const GraphView = memo(function GraphView({
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M5 3l14 9-6 1-4 6z" />
+            </svg>
+          </button>
+          <button
+            style={{
+              ...overlayStyles.toolButton,
+              ...(isSelectionMode ? overlayStyles.toolButtonActive : {}),
+            }}
+            onClick={() => {
+              setActiveTool('select');
+              cancelConnecting();
+              setIsSelectionMode((v) => !v);
+            }}
+            title="Selection Mode (toggle)"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2" strokeDasharray="3 2" />
+              <path d="M9 12l2 2 4-4" />
             </svg>
           </button>
           <button
@@ -1336,6 +1791,23 @@ export const GraphView = memo(function GraphView({
                 style={overlayStyles.colorInput}
               />
               <span style={overlayStyles.colorHex}>{nodeColor}</span>
+            </div>
+
+            {/* Label width slider */}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '4px', paddingTop: '8px' }}>
+              <div style={overlayStyles.nodeEditorRow}>
+                <label style={overlayStyles.nodeEditorLabel}>Width</label>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>{nodeLabelWidth}px</span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={200}
+                step={2}
+                value={nodeLabelWidth}
+                onChange={(e) => handleLabelWidthChange(parseInt(e.target.value, 10))}
+                style={overlayStyles.widthSlider}
+              />
             </div>
           </Island>
         </div>
@@ -1502,6 +1974,45 @@ export const GraphView = memo(function GraphView({
                 style={overlayStyles.colorInput}
               />
               <span style={overlayStyles.colorHex}>{frameBorderColor}</span>
+            </div>
+
+            {/* Alignment & Distribution */}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: '8px', paddingTop: '8px' }}>
+              <div style={overlayStyles.nodeEditorRow}>
+                <label style={overlayStyles.nodeEditorLabel}>Align</label>
+              </div>
+              <div style={overlayStyles.edgeOptionRow}>
+                <button style={overlayStyles.edgeOptionBtn} onClick={handleAlignCenterH} title="Align center horizontally">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="12" y1="2" x2="12" y2="22" />
+                    <rect x="4" y="6" width="16" height="4" rx="1" fill="none" />
+                    <rect x="6" y="14" width="12" height="4" rx="1" fill="none" />
+                  </svg>
+                </button>
+                <button style={overlayStyles.edgeOptionBtn} onClick={handleAlignCenterV} title="Align center vertically">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <rect x="6" y="4" width="4" height="16" rx="1" fill="none" />
+                    <rect x="14" y="6" width="4" height="12" rx="1" fill="none" />
+                  </svg>
+                </button>
+                <button style={overlayStyles.edgeOptionBtn} onClick={handleDistributeH} title="Distribute equally horizontally">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="2" y1="4" x2="2" y2="20" />
+                    <line x1="22" y1="4" x2="22" y2="20" />
+                    <circle cx="8" cy="12" r="2" />
+                    <circle cx="16" cy="12" r="2" />
+                  </svg>
+                </button>
+                <button style={overlayStyles.edgeOptionBtn} onClick={handleDistributeV} title="Distribute equally vertically">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="4" y1="2" x2="20" y2="2" />
+                    <line x1="4" y1="22" x2="20" y2="22" />
+                    <circle cx="12" cy="8" r="2" />
+                    <circle cx="12" cy="16" r="2" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             {/* Annotations section */}
@@ -1813,13 +2324,34 @@ export const GraphView = memo(function GraphView({
                 <label style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px', marginTop: '14px', display: 'block', fontWeight: 500 }}>
                   Area
                 </label>
-                {areas.length === 0 ? (
-                  <p style={{ fontSize: '13px', color: '#ef4444', margin: '0 0 8px 0' }}>
-                    No areas exist. Create an area first.
-                  </p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
-                    {areas.map((a) => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                  <button
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 12px',
+                      backgroundColor: createAreaId === '' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(0,0,0,0.2)',
+                      border: createAreaId === '' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid transparent',
+                      borderRadius: '8px',
+                      color: createAreaId === '' ? '#38bdf8' : '#94a3b8',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: createAreaId === '' ? 600 : 400,
+                      fontStyle: 'italic',
+                      textAlign: 'left' as const,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onClick={() => setCreateAreaId('')}
+                  >
+                    <span>No area</span>
+                    {createAreaId === '' && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 'auto' }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </button>
+                  {areas.map((a) => (
                       <button
                         key={a.id}
                         style={{
@@ -1849,7 +2381,6 @@ export const GraphView = memo(function GraphView({
                       </button>
                     ))}
                   </div>
-                )}
               </>
             )}
 
@@ -1864,10 +2395,10 @@ export const GraphView = memo(function GraphView({
               <button
                 style={{
                   ...overlayStyles.createModalCreateBtn,
-                  opacity: !createName.trim() || (createMode === 'content' && (!createAreaId || areas.length === 0)) ? 0.4 : 1,
+                  opacity: !createName.trim() ? 0.4 : 1,
                 }}
                 onClick={handleCreateFromModal}
-                disabled={!createName.trim() || (createMode === 'content' && (!createAreaId || areas.length === 0))}
+                disabled={!createName.trim()}
               >
                 Create
               </button>
@@ -2093,6 +2624,13 @@ const overlayStyles: Record<string, React.CSSProperties> = {
     fontSize: '11px',
     color: '#64748b',
     fontFamily: 'monospace',
+  },
+  widthSlider: {
+    width: '100%',
+    height: '4px',
+    cursor: 'pointer',
+    accentColor: '#38bdf8',
+    marginBottom: '4px',
   },
   frameInput: {
     flex: 1,

@@ -2,7 +2,7 @@
 // HomePage - Main landing page showing all areas
 // ============================================================
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 import { useAuthStore } from '../store/authStore';
@@ -17,16 +17,17 @@ export default function HomePage() {
 
   const authUser = useAuthStore((s) => s.user);
 
-  const { areas, contents, createArea, deleteArea } = useAppStore(
+  const { areas, contents, createArea, deleteArea, deleteContent } = useAppStore(
     useShallow((s) => ({
       areas: s.state.areas,
       contents: s.state.contents,
       createArea: s.createArea,
       deleteArea: s.deleteArea,
+      deleteContent: s.deleteContent,
     })),
   );
 
-  const contentsCount = useMemo(() => 
+  const contentsCount = useMemo(() =>
     contents.reduce(
       (acc, c) => {
         acc[c.areaId] = (acc[c.areaId] || 0) + 1;
@@ -35,6 +36,18 @@ export default function HomePage() {
       {} as Record<string, number>,
     ),
   [contents]);
+
+  const unassignedContents = useMemo(
+    () => contents.filter((c) => !c.areaId).sort((a, b) => b.updatedAt - a.updatedAt),
+    [contents],
+  );
+
+  const handleDeleteContent = useCallback((contentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Delete this content and all its links?')) {
+      deleteContent(contentId);
+    }
+  }, [deleteContent]);
 
   const handleCreateArea = () => {
     if (!newAreaName.trim()) {
@@ -104,6 +117,46 @@ export default function HomePage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Contents without areas */}
+      {unassignedContents.length > 0 && (
+        <div style={{ marginTop: '40px' }}>
+          <h2 style={styles.sectionTitle}>Contents without area</h2>
+          <div style={styles.grid}>
+            {unassignedContents.map((content) => (
+              <div
+                key={content.id}
+                style={styles.unassignedCard}
+                onClick={() => navigate(`/content/${content.id}`)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#a78bfa';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#334155';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <h3 style={styles.cardTitle}>
+                  {content.emoji ? `${content.emoji} ` : ''}{content.title}
+                </h3>
+                <p style={styles.cardDescription}>
+                  Updated {new Date(content.updatedAt).toLocaleDateString()}
+                </p>
+                <div style={styles.cardFooter}>
+                  <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>No area</span>
+                  <button
+                    style={styles.deleteButton}
+                    onClick={(e) => handleDeleteContent(content.id, e)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -268,5 +321,19 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     fontSize: '14px',
     cursor: 'pointer',
+  },
+  sectionTitle: {
+    fontSize: '20px',
+    fontWeight: 600,
+    color: '#94a3b8',
+    margin: '0 0 16px 0',
+  },
+  unassignedCard: {
+    backgroundColor: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: '12px',
+    padding: '20px',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
   },
 };
